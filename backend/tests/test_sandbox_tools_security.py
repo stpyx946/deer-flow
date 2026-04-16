@@ -357,7 +357,7 @@ def test_bash_tool_rejects_host_bash_when_local_sandbox_default(monkeypatch) -> 
         "deerflow.sandbox.tools.ensure_sandbox_initialized",
         lambda runtime: SimpleNamespace(execute_command=lambda command: pytest.fail("host bash should not execute")),
     )
-    monkeypatch.setattr("deerflow.sandbox.tools.is_host_bash_allowed", lambda: False)
+    monkeypatch.setattr("deerflow.sandbox.tools.is_host_bash_allowed", lambda *a, **k: False)
 
     result = bash_tool.func(
         runtime=runtime,
