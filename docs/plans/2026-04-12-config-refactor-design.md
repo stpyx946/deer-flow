@@ -1,8 +1,10 @@
 # Design: Eliminate Global Mutable State in Configuration System
 
-> Implements [#1811](https://github.com/bytedance/deer-flow/issues/1811) · Tracked in [#2151](https://github.com/bytedance/deer-flow/issues/2151) · Shipped in [PR #2271](https://github.com/bytedance/deer-flow/pull/2271)
+> Implements [#1811](https://github.com/bytedance/deer-flow/issues/1811) · Tracked in [#2151](https://github.com/bytedance/deer-flow/issues/2151)
 >
-> **Status:** Shipped. This document reflects the architecture that was merged. For the divergence from the original plan and the reasoning, see §7.
+> **Phase 1 (shipped):** [PR #2271](https://github.com/bytedance/deer-flow/pull/2271) — frozen config tree, purify `from_file()`, 3-tier `AppConfig.current()` lifecycle, `DeerFlowContext` for agent execution path.
+>
+> **Phase 2 (proposed):** eliminate the remaining implicit-state surface (`_global` / `_override` / `current()`) via pure explicit parameter passing. See §8.
 
 ## Problem
 
@@ -224,7 +226,7 @@ The `ConfigNotInitializedError` was replaced by a warning + auto-load. The hard 
 - `extensions_config.json` loading
 - External API behavior (Gateway, DeerFlowClient)
 
-## Migration scope (actual)
+## Migration scope (Phase 1, actual)
 
 - ~100 call-sites: `get_*_config()` → `AppConfig.current().xxx`
 - 6 runtime-path migrations: middlewares + sandbox tools read from `runtime.context` or `resolve_context()`
@@ -233,3 +235,180 @@ The `ConfigNotInitializedError` was replaced by a warning + auto-load. The hard 
 - New tests: `test_config_frozen.py`, `test_deer_flow_context.py`, `test_app_config_reload.py`
 - Gateway update flow: `reload_*` → `AppConfig.init(AppConfig.from_file())`
 - Dependency: langgraph `Runtime` / `ToolRuntime` (already available at target version)
+
+## 8. Phase 2: pure explicit parameter passing
+
+Phase 1 shipped a working 3-tier `AppConfig.current()` lifecycle. The remaining implicit-state surface is:
+
+- `AppConfig._global: ClassVar` — process-level singleton
+- `AppConfig._override: ClassVar[ContextVar]` — per-context override
+- `AppConfig.current()` — fallback-chain reader with auto-load warning
+
+Phase 2 proposes removing all three. `AppConfig` reduces to a pure Pydantic value object with `from_file()` as its only factory. All consumers receive `AppConfig` as an explicit parameter, either through a typed constructor, a function signature, or LangGraph `Runtime[DeerFlowContext]`.
+
+### 8.1 Motivation
+
+Phase 1 addressed the **data side** of the problem: config is now a frozen ADT, sub-module globals deleted, `from_file()` pure. The **access side** still relies on implicit ambient lookup:
+
+```python
+# Today (Phase 1 shipped):
+def _get_memory_prompt() -> str:
+    config = AppConfig.current().memory  # implicit global lookup
+    ...
+
+# Target (Phase 2):
+def _get_memory_prompt(config: MemoryConfig) -> str:  # explicit dependency
+    ...
+```
+
+Three concrete benefits:
+
+| Benefit | What it buys |
+|---------|-------------|
+| Referential transparency | A function's result depends only on its inputs. Testing becomes parameter substitution, no `patch.object(AppConfig, "current")` chains |
+| Dependency visibility | A function signature declares what config it needs. No "this deep helper secretly reads `.memory`" surprises |
+| True multi-config isolation | Two `DeerFlowClient` instances with different configs can run in the same process without any ambient shared state to contend over |
+
+The cost (Phase 1 wouldn't have made this smaller): ~97 production call sites + ~91 test mock sites need touching, plus signature changes for helpers that now accept `config` as a parameter.
+
+### 8.2 Non-agent call paths and their target APIs
+
+Phase 1 got the agent-execution path right (`runtime.context.app_config.xxx`). The unsolved paths split into four categories:
+
+**FastAPI Gateway** → `Depends(get_config)`
+
+```python
+# app/gateway/app.py — at startup
+app.state.config = AppConfig.from_file()
+
+# app/gateway/deps.py
+def get_config(request: Request) -> AppConfig:
+    return request.app.state.config
+
+# app/gateway/routers/models.py
+@router.get("/models")
+def list_models(config: AppConfig = Depends(get_config)):
+    ...
+
+# app/gateway/routers/mcp.py — config reload replaces AppConfig.init()
+@router.put("/config")
+def update_mcp(..., request: Request):
+    ...
+    request.app.state.config = AppConfig.from_file()
+```
+
+`app.state.config` is a FastAPI-owned attribute on the app object, not a module-level global. Scoped to the app's lifetime, only written at startup and config-reload.
+
+**`DeerFlowClient`** → constructor-captured config
+
+```python
+class DeerFlowClient:
+    def __init__(self, config_path: str | None = None, config: AppConfig | None = None):
+        self._config = config or AppConfig.from_file(config_path)
+
+    def chat(self, message: str, thread_id: str) -> str:
+        context = DeerFlowContext(app_config=self._config, thread_id=thread_id)
+        ...
+```
+
+Multiple `DeerFlowClient` instances are now first-class — each owns its config, nothing shared.
+
+**Agent construction (`make_lead_agent`, `_build_middlewares`, prompt helpers)** → threaded through
+
+```python
+def make_lead_agent(config: RunnableConfig, app_config: AppConfig):
+    middlewares = _build_middlewares(app_config, runtime_config=config)
+    ...
+
+def _build_middlewares(app_config: AppConfig, runtime_config: RunnableConfig):
+    if app_config.token_usage.enabled:
+        middlewares.append(TokenUsageMiddleware())
+    ...
+```
+
+Every helper that reads config is now on a function-signature chain from `make_lead_agent`.
+
+**Background threads (memory debounce Timer, queue consumers)** → closure-captured
+
+```python
+def MemoryQueue.add(self, conversation, user_id, config: MemoryConfig):
+    # capture config at enqueue time
+    def _flush():
+        self._updater.update(conversation, user_id, config)
+    self._timer = Timer(config.debounce_seconds, _flush)
+    self._timer.start()
+```
+
+The captured config lives in the closure, not in a contextvar the thread can't see.
+
+### 8.3 Target `AppConfig` shape
+
+```python
+class AppConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    log_level: str = "info"
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    ...  # same fields as Phase 1
+
+    @classmethod
+    def from_file(cls, config_path: str | None = None) -> Self:
+        """Pure factory. Reads file, returns frozen object. No side effects."""
+        ...
+
+    @classmethod
+    def resolve_config_path(cls, config_path: str | None = None) -> Path:
+        """Unchanged from Phase 1."""
+        ...
+
+    def get_model_config(self, name: str) -> ModelConfig | None:
+        """Unchanged."""
+        ...
+
+    # Removed:
+    # - _global: ClassVar
+    # - _override: ClassVar[ContextVar]
+    # - init(), set_override(), reset_override(), current()
+```
+
+### 8.4 `DeerFlowContext` and `resolve_context()` after Phase 2
+
+`DeerFlowContext` is unchanged — it's already Phase 2-compliant.
+
+`resolve_context()` simplifies: the "fall back to `AppConfig.current()`" branch goes away. The dict-context legacy path either constructs `DeerFlowContext` with an explicitly-passed `AppConfig` (fed by caller) or is deleted if no dict-context callers remain.
+
+```python
+def resolve_context(runtime: Any) -> DeerFlowContext:
+    ctx = getattr(runtime, "context", None)
+    if isinstance(ctx, DeerFlowContext):
+        return ctx
+    raise RuntimeError(
+        "runtime.context is not a DeerFlowContext. All callers must construct "
+        "and inject one explicitly; there is no global fallback."
+    )
+```
+
+Let-it-crash: if Phase 2 is done correctly, every caller constructs a typed context. If one doesn't, fail loudly.
+
+### 8.5 Trade-off acknowledgment
+
+The three cases where ambient lookup is genuinely tempting (and why we reject them):
+
+| Tempting case | Why ambient looks easier | Why we still reject it |
+|---------------|-------------------------|------------------------|
+| Deep helper in `memory/storage.py` needs `memory.storage_path` | Just threaded through 4 call layers | That's exactly the dependency chain you want visible. It's either there or it's hiding |
+| Community tool factory reading API keys from config | "Each tool factory doesn't want to take config" | Each tool factory literally needs the config. Passing it is the honest signature |
+| Test that wants to "override just one field globally" | `patch.object(AppConfig, "current")` is one line | Tests constructing their own `AppConfig` is one fixture — and that fixture becomes infrastructure for all future tests |
+
+The rejection is consistent: **an explicit parameter is strictly more honest than an implicit global lookup**, in every case.
+
+### 8.6 Scope
+
+- ~97 production call sites: `AppConfig.current()` → parameter
+- ~91 test mock sites: `patch.object(AppConfig, "current")` / `AppConfig._global = ...` → fixture injection
+- ~30 FastAPI endpoints gain `config: AppConfig = Depends(get_config)`
+- ~15 factory / helper functions gain `config: AppConfig` parameter
+- Delete from `app_config.py`: `_global`, `_override`, `init`, `current`, `set_override`, `reset_override`
+- Simplify `resolve_context()`: remove `AppConfig.current()` fallback
+
+Implementation plan: see [2026-04-12-config-refactor-plan.md §Phase 2](./2026-04-12-config-refactor-plan.md#phase-2-pure-explicit-parameter-passing).
