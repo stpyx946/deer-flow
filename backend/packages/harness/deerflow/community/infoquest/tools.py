@@ -1,6 +1,7 @@
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
 
 from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import resolve_context
 from deerflow.utils.readability import ReadabilityExtractor
 
 from .infoquest_client import InfoQuestClient
@@ -8,13 +9,13 @@ from .infoquest_client import InfoQuestClient
 readability_extractor = ReadabilityExtractor()
 
 
-def _get_infoquest_client() -> InfoQuestClient:
-    search_config = AppConfig.current().get_tool_config("web_search")
+def _get_infoquest_client(app_config: AppConfig) -> InfoQuestClient:
+    search_config = app_config.get_tool_config("web_search")
     search_time_range = -1
     if search_config is not None and "search_time_range" in search_config.model_extra:
         search_time_range = search_config.model_extra.get("search_time_range")
 
-    fetch_config = AppConfig.current().get_tool_config("web_fetch")
+    fetch_config = app_config.get_tool_config("web_fetch")
     fetch_time = -1
     if fetch_config is not None and "fetch_time" in fetch_config.model_extra:
         fetch_time = fetch_config.model_extra.get("fetch_time")
@@ -25,7 +26,7 @@ def _get_infoquest_client() -> InfoQuestClient:
     if fetch_config is not None and "navigation_timeout" in fetch_config.model_extra:
         navigation_timeout = fetch_config.model_extra.get("navigation_timeout")
 
-    image_search_config = AppConfig.current().get_tool_config("image_search")
+    image_search_config = app_config.get_tool_config("image_search")
     image_search_time_range = -1
     if image_search_config is not None and "image_search_time_range" in image_search_config.model_extra:
         image_search_time_range = image_search_config.model_extra.get("image_search_time_range")
@@ -44,19 +45,18 @@ def _get_infoquest_client() -> InfoQuestClient:
 
 
 @tool("web_search", parse_docstring=True)
-def web_search_tool(query: str) -> str:
+def web_search_tool(query: str, runtime: ToolRuntime) -> str:
     """Search the web.
 
     Args:
         query: The query to search for.
     """
-
-    client = _get_infoquest_client()
+    client = _get_infoquest_client(resolve_context(runtime).app_config)
     return client.web_search(query)
 
 
 @tool("web_fetch", parse_docstring=True)
-def web_fetch_tool(url: str) -> str:
+def web_fetch_tool(url: str, runtime: ToolRuntime) -> str:
     """Fetch the contents of a web page at a given URL.
     Only fetch EXACT URLs that have been provided directly by the user or have been returned in results from the web_search and web_fetch tools.
     This tool can NOT access content that requires authentication, such as private Google Docs or pages behind login walls.
@@ -66,7 +66,7 @@ def web_fetch_tool(url: str) -> str:
     Args:
         url: The URL to fetch the contents of.
     """
-    client = _get_infoquest_client()
+    client = _get_infoquest_client(resolve_context(runtime).app_config)
     result = client.fetch(url)
     if result.startswith("Error: "):
         return result
@@ -75,7 +75,7 @@ def web_fetch_tool(url: str) -> str:
 
 
 @tool("image_search", parse_docstring=True)
-def image_search_tool(query: str) -> str:
+def image_search_tool(query: str, runtime: ToolRuntime) -> str:
     """Search for images online. Use this tool BEFORE image generation to find reference images for characters, portraits, objects, scenes, or any content requiring visual accuracy.
 
     **When to use:**
@@ -89,5 +89,5 @@ def image_search_tool(query: str) -> str:
     Args:
         query: The query to search for images.
     """
-    client = _get_infoquest_client()
+    client = _get_infoquest_client(resolve_context(runtime).app_config)
     return client.image_search(query)

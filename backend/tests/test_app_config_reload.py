@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from deerflow.config.app_config import AppConfig
+
+pytestmark = pytest.mark.real_from_file
 
 
 def _write_config(path: Path, *, model_name: str, supports_thinking: bool) -> None:
@@ -31,7 +34,11 @@ def _write_extensions_config(path: Path) -> None:
     path.write_text(json.dumps({"mcpServers": {}, "skills": {}}), encoding="utf-8")
 
 
-def test_init_then_get(tmp_path, monkeypatch):
+def test_from_file_reads_model_name(tmp_path, monkeypatch):
+    """``AppConfig.from_file`` is the only lifecycle method now; there is no
+    process-global ``init/current``. Each consumer holds its own captured
+    AppConfig instance.
+    """
     config_path = tmp_path / "config.yaml"
     extensions_path = tmp_path / "extensions_config.json"
     _write_extensions_config(extensions_path)
@@ -41,14 +48,13 @@ def test_init_then_get(tmp_path, monkeypatch):
     monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(extensions_path))
 
     config = AppConfig.from_file(str(config_path))
-    AppConfig.init(config)
-
-    result = AppConfig.current()
-    assert result is config
-    assert result.models[0].name == "test-model"
+    assert config.models[0].name == "test-model"
 
 
-def test_init_replaces_previous(tmp_path, monkeypatch):
+def test_from_file_each_call_returns_fresh_instance(tmp_path, monkeypatch):
+    """Two reads of the same file produce separate AppConfig instances —
+    no hidden singleton, no memoization. Callers decide when to re-read.
+    """
     config_path = tmp_path / "config.yaml"
     extensions_path = tmp_path / "extensions_config.json"
     _write_extensions_config(extensions_path)
@@ -58,14 +64,12 @@ def test_init_replaces_previous(tmp_path, monkeypatch):
     monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(extensions_path))
 
     config_a = AppConfig.from_file(str(config_path))
-    AppConfig.init(config_a)
-    assert AppConfig.current().models[0].name == "model-a"
+    assert config_a.models[0].name == "model-a"
 
     _write_config(config_path, model_name="model-b", supports_thinking=True)
     config_b = AppConfig.from_file(str(config_path))
-    AppConfig.init(config_b)
-    assert AppConfig.current().models[0].name == "model-b"
-    assert AppConfig.current() is config_b
+    assert config_b.models[0].name == "model-b"
+    assert config_a is not config_b
 
 
 def test_config_version_check(tmp_path, monkeypatch):

@@ -67,17 +67,8 @@ class ChannelService:
         self._running = False
 
     @classmethod
-    def from_app_config(cls, app_config: AppConfig | None = None) -> ChannelService:
-        """Create a ChannelService from the application config.
-
-        Pass ``app_config`` explicitly when available (e.g. from Gateway
-        startup). Falls back to ``AppConfig.current()`` for legacy callers;
-        that fallback is removed in Phase 2 task P2-10.
-        """
-        if app_config is None:
-            from deerflow.config.app_config import AppConfig as _AppConfig
-
-            app_config = _AppConfig.current()
+    def from_app_config(cls, app_config: AppConfig) -> ChannelService:
+        """Create a ChannelService from an explicit application config."""
         channels_config = {}
         # extra fields are allowed by AppConfig (extra="allow")
         extra = app_config.model_extra or {}
@@ -190,12 +181,12 @@ def get_channel_service() -> ChannelService | None:
     return _channel_service
 
 
-async def start_channel_service() -> ChannelService:
+async def start_channel_service(app_config: AppConfig) -> ChannelService:
     """Create and start the global ChannelService from app config."""
     global _channel_service
     if _channel_service is not None:
         return _channel_service
-    _channel_service = ChannelService.from_app_config()
+    _channel_service = ChannelService.from_app_config(app_config)
     await _channel_service.start()
     return _channel_service
 

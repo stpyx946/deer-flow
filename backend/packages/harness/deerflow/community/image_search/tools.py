@@ -5,9 +5,9 @@ Image Search Tool - Search images using DuckDuckGo for reference in image genera
 import json
 import logging
 
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
 
-from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import resolve_context
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ def _search_images(
 @tool("image_search", parse_docstring=True)
 def image_search_tool(
     query: str,
+    runtime: ToolRuntime,
     max_results: int = 5,
     size: str | None = None,
     type_image: str | None = None,
@@ -99,11 +100,11 @@ def image_search_tool(
         type_image: Image type filter. Options: "photo", "clipart", "gif", "transparent", "line". Use "photo" for realistic references.
         layout: Layout filter. Options: "Square", "Tall", "Wide". Choose based on your generation needs.
     """
-    config = AppConfig.current().get_tool_config("image_search")
+    tool_config = resolve_context(runtime).app_config.get_tool_config("image_search")
 
     # Override max_results from config if set
-    if config is not None and "max_results" in config.model_extra:
-        max_results = config.model_extra.get("max_results", max_results)
+    if tool_config is not None and "max_results" in tool_config.model_extra:
+        max_results = tool_config.model_extra.get("max_results", max_results)
 
     results = _search_images(
         query=query,

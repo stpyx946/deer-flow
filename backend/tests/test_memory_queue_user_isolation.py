@@ -1,3 +1,15 @@
+
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
 """Tests for user_id propagation through memory queue."""
 from unittest.mock import MagicMock, patch
 
@@ -27,7 +39,7 @@ def test_conversation_context_user_id_default_none():
 
 
 def test_queue_add_stores_user_id():
-    q = MemoryUpdateQueue()
+    q = MemoryUpdateQueue(_TEST_APP_CONFIG)
     with patch.object(q, "_reset_timer"):
         q.add(thread_id="t1", messages=["msg"], user_id="alice")
     assert len(q._queue) == 1
@@ -36,7 +48,7 @@ def test_queue_add_stores_user_id():
 
 
 def test_queue_process_passes_user_id_to_updater():
-    q = MemoryUpdateQueue()
+    q = MemoryUpdateQueue(_TEST_APP_CONFIG)
     with patch.object(q, "_reset_timer"):
         q.add(thread_id="t1", messages=["msg"], user_id="alice")
 

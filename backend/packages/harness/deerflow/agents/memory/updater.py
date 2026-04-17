@@ -17,6 +17,7 @@ from deerflow.agents.memory.storage import (
     utc_now_iso_z,
 )
 from deerflow.config.app_config import AppConfig
+from deerflow.config.memory_config import MemoryConfig
 from deerflow.models import create_chat_model
 
 logger = logging.getLogger(__name__)
@@ -27,45 +28,33 @@ def _create_empty_memory() -> dict[str, Any]:
     return create_empty_memory()
 
 
-def _save_memory_to_file(memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> bool:
-    """Backward-compatible wrapper around the configured memory storage save path."""
-    return get_memory_storage().save(memory_data, agent_name, user_id=user_id)
+def _save_memory_to_file(memory_config: MemoryConfig, memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> bool:
+    """Save via the configured memory storage."""
+    return get_memory_storage(memory_config).save(memory_data, agent_name, user_id=user_id)
 
 
-def get_memory_data(agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+def get_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Get the current memory data via storage provider."""
-    return get_memory_storage().load(agent_name, user_id=user_id)
+    return get_memory_storage(memory_config).load(agent_name, user_id=user_id)
 
 
-def reload_memory_data(agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+def reload_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Reload memory data via storage provider."""
-    return get_memory_storage().reload(agent_name, user_id=user_id)
+    return get_memory_storage(memory_config).reload(agent_name, user_id=user_id)
 
 
-def import_memory_data(memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
-    """Persist imported memory data via storage provider.
-
-    Args:
-        memory_data: Full memory payload to persist.
-        agent_name: If provided, imports into per-agent memory.
-        user_id: If provided, scopes memory to a specific user.
-
-    Returns:
-        The saved memory data after storage normalization.
-
-    Raises:
-        OSError: If persisting the imported memory fails.
-    """
-    storage = get_memory_storage()
+def import_memory_data(memory_config: MemoryConfig, memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+    """Persist imported memory data via storage provider."""
+    storage = get_memory_storage(memory_config)
     if not storage.save(memory_data, agent_name, user_id=user_id):
         raise OSError("Failed to save imported memory data")
     return storage.load(agent_name, user_id=user_id)
 
 
-def clear_memory_data(agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+def clear_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Clear all stored memory data and persist an empty structure."""
     cleared_memory = create_empty_memory()
-    if not _save_memory_to_file(cleared_memory, agent_name, user_id=user_id):
+    if not _save_memory_to_file(memory_config, cleared_memory, agent_name, user_id=user_id):
         raise OSError("Failed to save cleared memory data")
     return cleared_memory
 
@@ -78,6 +67,7 @@ def _validate_confidence(confidence: float) -> float:
 
 
 def create_memory_fact(
+    memory_config: MemoryConfig,
     content: str,
     category: str = "context",
     confidence: float = 0.5,
@@ -93,7 +83,7 @@ def create_memory_fact(
     normalized_category = category.strip() or "context"
     validated_confidence = _validate_confidence(confidence)
     now = utc_now_iso_z()
-    memory_data = get_memory_data(agent_name, user_id=user_id)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     updated_memory = dict(memory_data)
     facts = list(memory_data.get("facts", []))
     facts.append(
@@ -108,15 +98,15 @@ def create_memory_fact(
     )
     updated_memory["facts"] = facts
 
-    if not _save_memory_to_file(updated_memory, agent_name, user_id=user_id):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError("Failed to save memory data after creating fact")
 
     return updated_memory
 
 
-def delete_memory_fact(fact_id: str, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+def delete_memory_fact(memory_config: MemoryConfig, fact_id: str, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Delete a fact by its id and persist the updated memory data."""
-    memory_data = get_memory_data(agent_name, user_id=user_id)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     facts = memory_data.get("facts", [])
     updated_facts = [fact for fact in facts if fact.get("id") != fact_id]
     if len(updated_facts) == len(facts):
@@ -125,13 +115,14 @@ def delete_memory_fact(fact_id: str, agent_name: str | None = None, *, user_id: 
     updated_memory = dict(memory_data)
     updated_memory["facts"] = updated_facts
 
-    if not _save_memory_to_file(updated_memory, agent_name, user_id=user_id):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError(f"Failed to save memory data after deleting fact '{fact_id}'")
 
     return updated_memory
 
 
 def update_memory_fact(
+    memory_config: MemoryConfig,
     fact_id: str,
     content: str | None = None,
     category: str | None = None,
@@ -141,7 +132,7 @@ def update_memory_fact(
     user_id: str | None = None,
 ) -> dict[str, Any]:
     """Update an existing fact and persist the updated memory data."""
-    memory_data = get_memory_data(agent_name, user_id=user_id)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     updated_memory = dict(memory_data)
     updated_facts: list[dict[str, Any]] = []
     found = False
@@ -168,7 +159,7 @@ def update_memory_fact(
 
     updated_memory["facts"] = updated_facts
 
-    if not _save_memory_to_file(updated_memory, agent_name, user_id=user_id):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError(f"Failed to save memory data after updating fact '{fact_id}'")
 
     return updated_memory
@@ -260,19 +251,25 @@ def _fact_content_key(content: Any) -> str | None:
 class MemoryUpdater:
     """Updates memory using LLM based on conversation context."""
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, app_config: AppConfig, model_name: str | None = None):
         """Initialize the memory updater.
 
         Args:
+            app_config: Application config (the updater needs both ``memory``
+                section for behavior and the full config for ``create_chat_model``).
             model_name: Optional model name to use. If None, uses config or default.
         """
+        self._app_config = app_config
         self._model_name = model_name
+
+    @property
+    def _memory_config(self) -> MemoryConfig:
+        return self._app_config.memory
 
     def _get_model(self):
         """Get the model for memory updates."""
-        config = AppConfig.current().memory
-        model_name = self._model_name or config.model_name
-        return create_chat_model(name=model_name, thinking_enabled=False)
+        model_name = self._model_name or self._memory_config.model_name
+        return create_chat_model(name=model_name, thinking_enabled=False, app_config=self._app_config)
 
     def update_memory(
         self,
@@ -296,7 +293,7 @@ class MemoryUpdater:
         Returns:
             True if update was successful, False otherwise.
         """
-        config = AppConfig.current().memory
+        config = self._memory_config
         if not config.enabled:
             return False
 
@@ -305,7 +302,7 @@ class MemoryUpdater:
 
         try:
             # Get current memory
-            current_memory = get_memory_data(agent_name, user_id=user_id)
+            current_memory = get_memory_data(config, agent_name, user_id=user_id)
 
             # Format conversation for prompt
             conversation_text = format_conversation_for_update(messages)
@@ -360,7 +357,7 @@ class MemoryUpdater:
             updated_memory = _strip_upload_mentions_from_memory(updated_memory)
 
             # Save
-            return get_memory_storage().save(updated_memory, agent_name, user_id=user_id)
+            return get_memory_storage(config).save(updated_memory, agent_name, user_id=user_id)
 
         except json.JSONDecodeError as e:
             logger.warning("Failed to parse LLM response for memory update: %s", e)
@@ -385,7 +382,7 @@ class MemoryUpdater:
         Returns:
             Updated memory data.
         """
-        config = AppConfig.current().memory
+        config = self._memory_config
         now = utc_now_iso_z()
 
         # Update user sections

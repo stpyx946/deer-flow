@@ -3,16 +3,31 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from deerflow.config.app_config import AppConfig
+from types import SimpleNamespace as _P2NS
+
+from deerflow.config.app_config import AppConfig as _P2AppConfig
+from deerflow.config.deer_flow_context import DeerFlowContext as _P2Ctx
+from deerflow.config.sandbox_config import SandboxConfig as _P2SandboxConfig
+
+_P2_APP_CONFIG = _P2AppConfig(sandbox=_P2SandboxConfig(use="test"))
+_P2_RUNTIME = _P2NS(context=_P2Ctx(app_config=_P2_APP_CONFIG, thread_id="test-thread"))
+
+
+def _runtime_with_config(config):
+    ctx = _P2Ctx.__new__(_P2Ctx)
+    object.__setattr__(ctx, "app_config", config)
+    object.__setattr__(ctx, "thread_id", "test-thread")
+    object.__setattr__(ctx, "agent_name", None)
+    return _P2NS(context=ctx)
 
 
 class TestWebSearchTool:
     @patch("deerflow.community.firecrawl.tools.FirecrawlApp")
-    @patch.object(AppConfig, "current")
-    def test_search_uses_web_search_config(self, mock_get_app_config, mock_firecrawl_cls):
+    def test_search_uses_web_search_config(self, mock_firecrawl_cls):
         search_config = MagicMock()
         search_config.model_extra = {"api_key": "firecrawl-search-key", "max_results": 7}
-        mock_get_app_config.return_value.get_tool_config.return_value = search_config
+        fake_config = MagicMock()
+        fake_config.get_tool_config.return_value = search_config
 
         mock_result = MagicMock()
         mock_result.web = [
@@ -22,7 +37,7 @@ class TestWebSearchTool:
 
         from deerflow.community.firecrawl.tools import web_search_tool
 
-        result = web_search_tool.invoke({"query": "test query"})
+        result = web_search_tool.func(query="test query", runtime=_runtime_with_config(fake_config))
 
         assert json.loads(result) == [
             {
@@ -31,15 +46,14 @@ class TestWebSearchTool:
                 "snippet": "Snippet",
             }
         ]
-        mock_get_app_config.return_value.get_tool_config.assert_called_with("web_search")
+        fake_config.get_tool_config.assert_called_with("web_search")
         mock_firecrawl_cls.assert_called_once_with(api_key="firecrawl-search-key")
         mock_firecrawl_cls.return_value.search.assert_called_once_with("test query", limit=7)
 
 
 class TestWebFetchTool:
     @patch("deerflow.community.firecrawl.tools.FirecrawlApp")
-    @patch.object(AppConfig, "current")
-    def test_fetch_uses_web_fetch_config(self, mock_get_app_config, mock_firecrawl_cls):
+    def test_fetch_uses_web_fetch_config(self, mock_firecrawl_cls):
         fetch_config = MagicMock()
         fetch_config.model_extra = {"api_key": "firecrawl-fetch-key"}
 
@@ -48,7 +62,8 @@ class TestWebFetchTool:
                 return fetch_config
             return None
 
-        mock_get_app_config.return_value.get_tool_config.side_effect = get_tool_config
+        fake_config = MagicMock()
+        fake_config.get_tool_config.side_effect = get_tool_config
 
         mock_scrape_result = MagicMock()
         mock_scrape_result.markdown = "Fetched markdown"
@@ -57,10 +72,10 @@ class TestWebFetchTool:
 
         from deerflow.community.firecrawl.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com"})
+        result = web_fetch_tool.func(url="https://example.com", runtime=_runtime_with_config(fake_config))
 
         assert result == "# Fetched Page\n\nFetched markdown"
-        mock_get_app_config.return_value.get_tool_config.assert_any_call("web_fetch")
+        fake_config.get_tool_config.assert_any_call("web_fetch")
         mock_firecrawl_cls.assert_called_once_with(api_key="firecrawl-fetch-key")
         mock_firecrawl_cls.return_value.scrape.assert_called_once_with(
             "https://example.com",

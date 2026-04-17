@@ -7,6 +7,31 @@ import pytest
 
 from deerflow.config.app_config import AppConfig
 
+# --- Phase 2 test helper: injected runtime for community tools ---
+from types import SimpleNamespace as _P2NS
+from deerflow.config.app_config import AppConfig as _P2AppConfig
+from deerflow.config.sandbox_config import SandboxConfig as _P2SandboxConfig
+from deerflow.config.deer_flow_context import DeerFlowContext as _P2Ctx
+_P2_APP_CONFIG = _P2AppConfig(sandbox=_P2SandboxConfig(use="test"))
+_P2_RUNTIME = _P2NS(context=_P2Ctx(app_config=_P2_APP_CONFIG, thread_id="test-thread"))
+
+
+def _runtime_with_config(config):
+    """Build a runtime carrying a custom (possibly mocked) app_config.
+
+    ``DeerFlowContext`` is a frozen dataclass typed as ``AppConfig`` but
+    dataclasses don't enforce the type at runtime — handing a Mock through
+    lets tests exercise the tool's ``get_tool_config`` lookup without going
+    via ``AppConfig.current``.
+    """
+    ctx = _P2Ctx.__new__(_P2Ctx)
+    object.__setattr__(ctx, "app_config", config)
+    object.__setattr__(ctx, "thread_id", "test-thread")
+    object.__setattr__(ctx, "agent_name", None)
+    return _P2NS(context=ctx)
+# -------------------------------------------------------------------
+
+
 
 @pytest.fixture
 def mock_app_config():
@@ -51,7 +76,7 @@ class TestWebSearchTool:
 
         from deerflow.community.exa.tools import web_search_tool
 
-        result = web_search_tool.invoke({"query": "test query"})
+        result = web_search_tool.func(query="test query", runtime=_P2_RUNTIME)
         parsed = json.loads(result)
 
         assert len(parsed) == 2
@@ -69,30 +94,30 @@ class TestWebSearchTool:
 
     def test_search_with_custom_config(self, mock_exa_client):
         """Test search respects custom configuration values."""
-        with patch.object(AppConfig, "current") as mock_config:
-            tool_config = MagicMock()
-            tool_config.model_extra = {
-                "max_results": 10,
-                "search_type": "neural",
-                "contents_max_characters": 2000,
-                "api_key": "test-key",
-            }
-            mock_config.return_value.get_tool_config.return_value = tool_config
+        tool_config = MagicMock()
+        tool_config.model_extra = {
+            "max_results": 10,
+            "search_type": "neural",
+            "contents_max_characters": 2000,
+            "api_key": "test-key",
+        }
+        fake_config = MagicMock()
+        fake_config.get_tool_config.return_value = tool_config
 
-            mock_response = MagicMock()
-            mock_response.results = []
-            mock_exa_client.search.return_value = mock_response
+        mock_response = MagicMock()
+        mock_response.results = []
+        mock_exa_client.search.return_value = mock_response
 
-            from deerflow.community.exa.tools import web_search_tool
+        from deerflow.community.exa.tools import web_search_tool
 
-            web_search_tool.invoke({"query": "neural search"})
+        web_search_tool.func(query="neural search", runtime=_runtime_with_config(fake_config))
 
-            mock_exa_client.search.assert_called_once_with(
-                "neural search",
-                type="neural",
-                num_results=10,
-                contents={"highlights": {"max_characters": 2000}},
-            )
+        mock_exa_client.search.assert_called_once_with(
+            "neural search",
+            type="neural",
+            num_results=10,
+            contents={"highlights": {"max_characters": 2000}},
+        )
 
     def test_search_with_no_highlights(self, mock_app_config, mock_exa_client):
         """Test search handles results with no highlights."""
@@ -107,7 +132,7 @@ class TestWebSearchTool:
 
         from deerflow.community.exa.tools import web_search_tool
 
-        result = web_search_tool.invoke({"query": "test"})
+        result = web_search_tool.func(query="test", runtime=_P2_RUNTIME)
         parsed = json.loads(result)
 
         assert parsed[0]["snippet"] == ""
@@ -120,7 +145,7 @@ class TestWebSearchTool:
 
         from deerflow.community.exa.tools import web_search_tool
 
-        result = web_search_tool.invoke({"query": "nothing"})
+        result = web_search_tool.func(query="nothing", runtime=_P2_RUNTIME)
         parsed = json.loads(result)
 
         assert parsed == []
@@ -131,7 +156,7 @@ class TestWebSearchTool:
 
         from deerflow.community.exa.tools import web_search_tool
 
-        result = web_search_tool.invoke({"query": "error"})
+        result = web_search_tool.func(query="error", runtime=_P2_RUNTIME)
 
         assert result == "Error: API rate limit exceeded"
 
@@ -149,7 +174,7 @@ class TestWebFetchTool:
 
         from deerflow.community.exa.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com"})
+        result = web_fetch_tool.func(url="https://example.com", runtime=_P2_RUNTIME)
 
         assert result == "# Fetched Page\n\nThis is the page content."
         mock_exa_client.get_contents.assert_called_once_with(
@@ -169,7 +194,7 @@ class TestWebFetchTool:
 
         from deerflow.community.exa.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com"})
+        result = web_fetch_tool.func(url="https://example.com", runtime=_P2_RUNTIME)
 
         assert result.startswith("# Untitled\n\n")
 
@@ -181,7 +206,7 @@ class TestWebFetchTool:
 
         from deerflow.community.exa.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com/404"})
+        result = web_fetch_tool.func(url="https://example.com/404", runtime=_P2_RUNTIME)
 
         assert result == "Error: No results found"
 
@@ -191,16 +216,44 @@ class TestWebFetchTool:
 
         from deerflow.community.exa.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com"})
+        result = web_fetch_tool.func(url="https://example.com", runtime=_P2_RUNTIME)
 
         assert result == "Error: Connection timeout"
 
     def test_fetch_reads_web_fetch_config(self, mock_exa_client):
         """Test that web_fetch_tool reads 'web_fetch' config, not 'web_search'."""
-        with patch.object(AppConfig, "current") as mock_config:
-            tool_config = MagicMock()
-            tool_config.model_extra = {"api_key": "exa-fetch-key"}
-            mock_config.return_value.get_tool_config.return_value = tool_config
+        tool_config = MagicMock()
+        tool_config.model_extra = {"api_key": "exa-fetch-key"}
+        fake_config = MagicMock()
+        fake_config.get_tool_config.return_value = tool_config
+
+        mock_result = MagicMock()
+        mock_result.title = "Page"
+        mock_result.text = "Content."
+        mock_response = MagicMock()
+        mock_response.results = [mock_result]
+        mock_exa_client.get_contents.return_value = mock_response
+
+        from deerflow.community.exa.tools import web_fetch_tool
+
+        web_fetch_tool.func(url="https://example.com", runtime=_runtime_with_config(fake_config))
+
+        fake_config.get_tool_config.assert_any_call("web_fetch")
+
+    def test_fetch_uses_independent_api_key(self, mock_exa_client):
+        """Test mixed-provider config: web_fetch uses its own api_key, not web_search's."""
+        with patch("deerflow.community.exa.tools.Exa") as mock_exa_cls:
+            mock_exa_cls.return_value = mock_exa_client
+            fetch_config = MagicMock()
+            fetch_config.model_extra = {"api_key": "exa-fetch-key"}
+
+            def get_tool_config(name):
+                if name == "web_fetch":
+                    return fetch_config
+                return None
+
+            fake_config = MagicMock()
+            fake_config.get_tool_config.side_effect = get_tool_config
 
             mock_result = MagicMock()
             mock_result.title = "Page"
@@ -211,37 +264,9 @@ class TestWebFetchTool:
 
             from deerflow.community.exa.tools import web_fetch_tool
 
-            web_fetch_tool.invoke({"url": "https://example.com"})
+            web_fetch_tool.func(url="https://example.com", runtime=_runtime_with_config(fake_config))
 
-            mock_config.return_value.get_tool_config.assert_any_call("web_fetch")
-
-    def test_fetch_uses_independent_api_key(self, mock_exa_client):
-        """Test mixed-provider config: web_fetch uses its own api_key, not web_search's."""
-        with patch.object(AppConfig, "current") as mock_config:
-            with patch("deerflow.community.exa.tools.Exa") as mock_exa_cls:
-                mock_exa_cls.return_value = mock_exa_client
-                fetch_config = MagicMock()
-                fetch_config.model_extra = {"api_key": "exa-fetch-key"}
-
-                def get_tool_config(name):
-                    if name == "web_fetch":
-                        return fetch_config
-                    return None
-
-                mock_config.return_value.get_tool_config.side_effect = get_tool_config
-
-                mock_result = MagicMock()
-                mock_result.title = "Page"
-                mock_result.text = "Content."
-                mock_response = MagicMock()
-                mock_response.results = [mock_result]
-                mock_exa_client.get_contents.return_value = mock_response
-
-                from deerflow.community.exa.tools import web_fetch_tool
-
-                web_fetch_tool.invoke({"url": "https://example.com"})
-
-                mock_exa_cls.assert_called_once_with(api_key="exa-fetch-key")
+            mock_exa_cls.assert_called_once_with(api_key="exa-fetch-key")
 
     def test_fetch_truncates_long_content(self, mock_app_config, mock_exa_client):
         """Test fetch truncates content to 4096 characters."""
@@ -255,7 +280,7 @@ class TestWebFetchTool:
 
         from deerflow.community.exa.tools import web_fetch_tool
 
-        result = web_fetch_tool.invoke({"url": "https://example.com"})
+        result = web_fetch_tool.func(url="https://example.com", runtime=_P2_RUNTIME)
 
         # "# Long Page\n\n" is 14 chars, content truncated to 4096
         content_after_header = result.split("\n\n", 1)[1]

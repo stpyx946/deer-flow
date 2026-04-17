@@ -39,21 +39,36 @@ class SandboxProvider(ABC):
 _default_sandbox_provider: SandboxProvider | None = None
 
 
-def get_sandbox_provider(**kwargs) -> SandboxProvider:
+def get_sandbox_provider(app_config: AppConfig, **kwargs) -> SandboxProvider:
     """Get the sandbox provider singleton.
 
     Returns a cached singleton instance. Use `reset_sandbox_provider()` to clear
     the cache, or `shutdown_sandbox_provider()` to properly shutdown and clear.
+
+    Args:
+        app_config: Application config used the first time the singleton is built.
+                    Ignored on subsequent calls — the cached instance is returned
+                    regardless of the config passed.
 
     Returns:
         A sandbox provider instance.
     """
     global _default_sandbox_provider
     if _default_sandbox_provider is None:
-        config = AppConfig.current()
-        cls = resolve_class(config.sandbox.use, SandboxProvider)
-        _default_sandbox_provider = cls(**kwargs)
+        cls = resolve_class(app_config.sandbox.use, SandboxProvider)
+        _default_sandbox_provider = cls(app_config=app_config, **kwargs) if _accepts_app_config(cls) else cls(**kwargs)
     return _default_sandbox_provider
+
+
+def _accepts_app_config(cls: type) -> bool:
+    """Return True when the provider's __init__ accepts an ``app_config`` kwarg."""
+    import inspect
+
+    try:
+        sig = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return False
+    return "app_config" in sig.parameters
 
 
 def reset_sandbox_provider() -> None:

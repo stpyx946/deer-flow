@@ -20,16 +20,17 @@ ALLOWED_SUPPORT_SUBDIRS = {"references", "templates", "scripts", "assets"}
 _SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-def get_skills_root_dir() -> Path:
-    return AppConfig.current().skills.get_skills_path()
+def get_skills_root_dir(app_config: AppConfig) -> Path:
+    """Return the configured skills root."""
+    return app_config.skills.get_skills_path()
 
 
-def get_public_skills_dir() -> Path:
-    return get_skills_root_dir() / "public"
+def get_public_skills_dir(app_config: AppConfig) -> Path:
+    return get_skills_root_dir(app_config) / "public"
 
 
-def get_custom_skills_dir() -> Path:
-    path = get_skills_root_dir() / "custom"
+def get_custom_skills_dir(app_config: AppConfig) -> Path:
+    path = get_skills_root_dir(app_config) / "custom"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -43,46 +44,46 @@ def validate_skill_name(name: str) -> str:
     return normalized
 
 
-def get_custom_skill_dir(name: str) -> Path:
-    return get_custom_skills_dir() / validate_skill_name(name)
+def get_custom_skill_dir(name: str, app_config: AppConfig) -> Path:
+    return get_custom_skills_dir(app_config) / validate_skill_name(name)
 
 
-def get_custom_skill_file(name: str) -> Path:
-    return get_custom_skill_dir(name) / SKILL_FILE_NAME
+def get_custom_skill_file(name: str, app_config: AppConfig) -> Path:
+    return get_custom_skill_dir(name, app_config) / SKILL_FILE_NAME
 
 
-def get_custom_skill_history_dir() -> Path:
-    path = get_custom_skills_dir() / HISTORY_DIR_NAME
+def get_custom_skill_history_dir(app_config: AppConfig) -> Path:
+    path = get_custom_skills_dir(app_config) / HISTORY_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def get_skill_history_file(name: str) -> Path:
-    return get_custom_skill_history_dir() / f"{validate_skill_name(name)}.jsonl"
+def get_skill_history_file(name: str, app_config: AppConfig) -> Path:
+    return get_custom_skill_history_dir(app_config) / f"{validate_skill_name(name)}.jsonl"
 
 
-def get_public_skill_dir(name: str) -> Path:
-    return get_public_skills_dir() / validate_skill_name(name)
+def get_public_skill_dir(name: str, app_config: AppConfig) -> Path:
+    return get_public_skills_dir(app_config) / validate_skill_name(name)
 
 
-def custom_skill_exists(name: str) -> bool:
-    return get_custom_skill_file(name).exists()
+def custom_skill_exists(name: str, app_config: AppConfig) -> bool:
+    return get_custom_skill_file(name, app_config).exists()
 
 
-def public_skill_exists(name: str) -> bool:
-    return (get_public_skill_dir(name) / SKILL_FILE_NAME).exists()
+def public_skill_exists(name: str, app_config: AppConfig) -> bool:
+    return (get_public_skill_dir(name, app_config) / SKILL_FILE_NAME).exists()
 
 
-def ensure_custom_skill_is_editable(name: str) -> None:
-    if custom_skill_exists(name):
+def ensure_custom_skill_is_editable(name: str, app_config: AppConfig) -> None:
+    if custom_skill_exists(name, app_config):
         return
-    if public_skill_exists(name):
+    if public_skill_exists(name, app_config):
         raise ValueError(f"'{name}' is a built-in skill. To customise it, create a new skill with the same name under skills/custom/.")
     raise FileNotFoundError(f"Custom skill '{name}' not found.")
 
 
-def ensure_safe_support_path(name: str, relative_path: str) -> Path:
-    skill_dir = get_custom_skill_dir(name).resolve()
+def ensure_safe_support_path(name: str, relative_path: str, app_config: AppConfig) -> Path:
+    skill_dir = get_custom_skill_dir(name, app_config).resolve()
     if not relative_path or relative_path.endswith("/"):
         raise ValueError("Supporting file path must include a filename.")
     relative = Path(relative_path)
@@ -124,8 +125,8 @@ def atomic_write(path: Path, content: str) -> None:
     tmp_path.replace(path)
 
 
-def append_history(name: str, record: dict[str, Any]) -> None:
-    history_path = get_skill_history_file(name)
+def append_history(name: str, record: dict[str, Any], app_config: AppConfig) -> None:
+    history_path = get_skill_history_file(name, app_config)
     history_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": datetime.now(UTC).isoformat(),
@@ -136,8 +137,8 @@ def append_history(name: str, record: dict[str, Any]) -> None:
         f.write("\n")
 
 
-def read_history(name: str) -> list[dict[str, Any]]:
-    history_path = get_skill_history_file(name)
+def read_history(name: str, app_config: AppConfig) -> list[dict[str, Any]]:
+    history_path = get_skill_history_file(name, app_config)
     if not history_path.exists():
         return []
     records: list[dict[str, Any]] = []
@@ -148,12 +149,12 @@ def read_history(name: str) -> list[dict[str, Any]]:
     return records
 
 
-def list_custom_skills() -> list:
-    return [skill for skill in load_skills(enabled_only=False) if skill.category == "custom"]
+def list_custom_skills(app_config: AppConfig) -> list:
+    return [skill for skill in load_skills(app_config, enabled_only=False) if skill.category == "custom"]
 
 
-def read_custom_skill_content(name: str) -> str:
-    skill_file = get_custom_skill_file(name)
+def read_custom_skill_content(name: str, app_config: AppConfig) -> str:
+    skill_file = get_custom_skill_file(name, app_config)
     if not skill_file.exists():
         raise FileNotFoundError(f"Custom skill '{name}' not found.")
     return skill_file.read_text(encoding="utf-8")

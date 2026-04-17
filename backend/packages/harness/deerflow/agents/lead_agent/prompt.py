@@ -20,19 +20,20 @@ _enabled_skills_refresh_version = 0
 _enabled_skills_refresh_event = threading.Event()
 
 
-def _load_enabled_skills_sync() -> list[Skill]:
-    return list(load_skills(enabled_only=True))
+def _load_enabled_skills_sync(app_config: AppConfig | None) -> list[Skill]:
+    return list(load_skills(app_config, enabled_only=True))
 
 
-def _start_enabled_skills_refresh_thread() -> None:
+def _start_enabled_skills_refresh_thread(app_config: AppConfig | None) -> None:
     threading.Thread(
         target=_refresh_enabled_skills_cache_worker,
+        args=(app_config,),
         name="deerflow-enabled-skills-loader",
         daemon=True,
     ).start()
 
 
-def _refresh_enabled_skills_cache_worker() -> None:
+def _refresh_enabled_skills_cache_worker(app_config: AppConfig | None) -> None:
     global _enabled_skills_cache, _enabled_skills_refresh_active
 
     while True:
@@ -40,8 +41,8 @@ def _refresh_enabled_skills_cache_worker() -> None:
             target_version = _enabled_skills_refresh_version
 
         try:
-            skills = _load_enabled_skills_sync()
-        except Exception:
+            skills = _load_enabled_skills_sync(app_config)
+        except (OSError, ImportError):
             logger.exception("Failed to load enabled skills for prompt injection")
             skills = []
 
@@ -57,7 +58,7 @@ def _refresh_enabled_skills_cache_worker() -> None:
             _enabled_skills_cache = None
 
 
-def _ensure_enabled_skills_cache() -> threading.Event:
+def _ensure_enabled_skills_cache(app_config: AppConfig | None) -> threading.Event:
     global _enabled_skills_refresh_active
 
     with _enabled_skills_lock:
@@ -69,11 +70,11 @@ def _ensure_enabled_skills_cache() -> threading.Event:
         _enabled_skills_refresh_active = True
         _enabled_skills_refresh_event.clear()
 
-    _start_enabled_skills_refresh_thread()
+    _start_enabled_skills_refresh_thread(app_config)
     return _enabled_skills_refresh_event
 
 
-def _invalidate_enabled_skills_cache() -> threading.Event:
+def _invalidate_enabled_skills_cache(app_config: AppConfig | None) -> threading.Event:
     global _enabled_skills_cache, _enabled_skills_refresh_active, _enabled_skills_refresh_version
 
     _get_cached_skills_prompt_section.cache_clear()
@@ -85,30 +86,30 @@ def _invalidate_enabled_skills_cache() -> threading.Event:
             return _enabled_skills_refresh_event
         _enabled_skills_refresh_active = True
 
-    _start_enabled_skills_refresh_thread()
+    _start_enabled_skills_refresh_thread(app_config)
     return _enabled_skills_refresh_event
 
 
-def prime_enabled_skills_cache() -> None:
-    _ensure_enabled_skills_cache()
+def prime_enabled_skills_cache(app_config: AppConfig | None = None) -> None:
+    _ensure_enabled_skills_cache(app_config)
 
 
-def warm_enabled_skills_cache(timeout_seconds: float = _ENABLED_SKILLS_REFRESH_WAIT_TIMEOUT_SECONDS) -> bool:
-    if _ensure_enabled_skills_cache().wait(timeout=timeout_seconds):
+def warm_enabled_skills_cache(app_config: AppConfig | None = None, timeout_seconds: float = _ENABLED_SKILLS_REFRESH_WAIT_TIMEOUT_SECONDS) -> bool:
+    if _ensure_enabled_skills_cache(app_config).wait(timeout=timeout_seconds):
         return True
 
     logger.warning("Timed out waiting %.1fs for enabled skills cache warm-up", timeout_seconds)
     return False
 
 
-def _get_enabled_skills():
+def _get_enabled_skills(app_config: AppConfig | None = None):
     with _enabled_skills_lock:
         cached = _enabled_skills_cache
 
     if cached is not None:
         return list(cached)
 
-    _ensure_enabled_skills_cache()
+    _ensure_enabled_skills_cache(app_config)
     return []
 
 
@@ -116,12 +117,12 @@ def _skill_mutability_label(category: str) -> str:
     return "[custom, editable]" if category == "custom" else "[built-in]"
 
 
-def clear_skills_system_prompt_cache() -> None:
-    _invalidate_enabled_skills_cache()
+def clear_skills_system_prompt_cache(app_config: AppConfig | None = None) -> None:
+    _invalidate_enabled_skills_cache(app_config)
 
 
-async def refresh_skills_system_prompt_cache_async() -> None:
-    await asyncio.to_thread(_invalidate_enabled_skills_cache().wait)
+async def refresh_skills_system_prompt_cache_async(app_config: AppConfig | None = None) -> None:
+    await asyncio.to_thread(_invalidate_enabled_skills_cache(app_config).wait)
 
 
 def _reset_skills_system_prompt_cache_state() -> None:
@@ -135,10 +136,10 @@ def _reset_skills_system_prompt_cache_state() -> None:
         _enabled_skills_refresh_event.clear()
 
 
-def _refresh_enabled_skills_cache() -> None:
+def _refresh_enabled_skills_cache(app_config: AppConfig | None = None) -> None:
     """Backward-compatible test helper for direct synchronous reload."""
     try:
-        skills = _load_enabled_skills_sync()
+        skills = _load_enabled_skills_sync(app_config)
     except Exception:
         logger.exception("Failed to load enabled skills for prompt injection")
         skills = []
@@ -165,17 +166,18 @@ Skip simple one-off tasks.
 """
 
 
-def _build_subagent_section(max_concurrent: int) -> str:
+def _build_subagent_section(max_concurrent: int, app_config: AppConfig) -> str:
     """Build the subagent system prompt section with dynamic concurrency limit.
 
     Args:
         max_concurrent: Maximum number of concurrent subagent calls allowed per response.
+        app_config: Application config used to gate bash availability.
 
     Returns:
         Formatted subagent section string.
     """
     n = max_concurrent
-    bash_available = "bash" in get_available_subagent_names()
+    bash_available = "bash" in get_available_subagent_names(app_config)
     available_subagents = (
         "- **general-purpose**: For ANY non-trivial task - web research, code exploration, file operations, analysis, etc.\n- **bash**: For command execution (git, build, test, deploy operations)"
         if bash_available
@@ -508,36 +510,34 @@ combined with a FastAPI gateway for REST API access [citation:FastAPI](https://f
 """
 
 
-def _get_memory_context(agent_name: str | None = None) -> str:
+def _get_memory_context(app_config: AppConfig, agent_name: str | None = None) -> str:
     """Get memory context for injection into system prompt.
 
-    Args:
-        agent_name: If provided, loads per-agent memory. If None, loads global memory.
-
-    Returns:
-        Formatted memory context string wrapped in XML tags, or empty string if disabled.
+    Returns an empty string when memory is disabled or the stored memory file
+    cannot be read/parsed. A corrupt memory.json degrades the prompt to
+    no-memory; it never kills the agent.
     """
+    from deerflow.agents.memory import format_memory_for_injection, get_memory_data
+    from deerflow.runtime.user_context import get_effective_user_id
+
+    memory_config = app_config.memory
+    if not memory_config.enabled or not memory_config.injection_enabled:
+        return ""
+
     try:
-        from deerflow.agents.memory import format_memory_for_injection, get_memory_data
-        from deerflow.runtime.user_context import get_effective_user_id
+        memory_data = get_memory_data(memory_config, agent_name, user_id=get_effective_user_id())
+    except (OSError, ValueError, UnicodeDecodeError):
+        logger.exception("Failed to load memory data for prompt injection")
+        return ""
 
-        config = AppConfig.current().memory
-        if not config.enabled or not config.injection_enabled:
-            return ""
+    memory_content = format_memory_for_injection(memory_data, max_tokens=memory_config.max_injection_tokens)
+    if not memory_content.strip():
+        return ""
 
-        memory_data = get_memory_data(agent_name, user_id=get_effective_user_id())
-        memory_content = format_memory_for_injection(memory_data, max_tokens=config.max_injection_tokens)
-
-        if not memory_content.strip():
-            return ""
-
-        return f"""<memory>
+    return f"""<memory>
 {memory_content}
 </memory>
 """
-    except Exception as e:
-        logger.error("Failed to load memory context: %s", e)
-        return ""
 
 
 @lru_cache(maxsize=32)
@@ -572,17 +572,12 @@ You have access to skills that provide optimized workflows for specific tasks. E
 </skill_system>"""
 
 
-def get_skills_prompt_section(available_skills: set[str] | None = None) -> str:
+def get_skills_prompt_section(app_config: AppConfig, available_skills: set[str] | None = None) -> str:
     """Generate the skills prompt section with available skills list."""
-    skills = _get_enabled_skills()
+    skills = _get_enabled_skills(app_config)
 
-    try:
-        config = AppConfig.current()
-        container_base_path = config.skills.container_path
-        skill_evolution_enabled = config.skill_evolution.enabled
-    except Exception:
-        container_base_path = "/mnt/skills"
-        skill_evolution_enabled = False
+    container_base_path = app_config.skills.container_path
+    skill_evolution_enabled = app_config.skill_evolution.enabled
 
     if not skills and not skill_evolution_enabled:
         return ""
@@ -606,7 +601,7 @@ def get_agent_soul(agent_name: str | None) -> str:
     return ""
 
 
-def get_deferred_tools_prompt_section() -> str:
+def get_deferred_tools_prompt_section(app_config: AppConfig) -> str:
     """Generate <available-deferred-tools> block for the system prompt.
 
     Lists only deferred tool names so the agent knows what exists
@@ -615,10 +610,7 @@ def get_deferred_tools_prompt_section() -> str:
     """
     from deerflow.tools.builtins.tool_search import get_deferred_registry
 
-    try:
-        if not AppConfig.current().tool_search.enabled:
-            return ""
-    except Exception:
+    if not app_config.tool_search.enabled:
         return ""
 
     registry = get_deferred_registry()
@@ -629,13 +621,9 @@ def get_deferred_tools_prompt_section() -> str:
     return f"<available-deferred-tools>\n{names}\n</available-deferred-tools>"
 
 
-def _build_acp_section() -> str:
+def _build_acp_section(app_config: AppConfig) -> str:
     """Build the ACP agent prompt section, only if ACP agents are configured."""
-    try:
-        agents = AppConfig.current().acp_agents
-        if not agents:
-            return ""
-    except Exception:
+    if not app_config.acp_agents:
         return ""
 
     return (
@@ -647,13 +635,9 @@ def _build_acp_section() -> str:
     )
 
 
-def _build_custom_mounts_section() -> str:
+def _build_custom_mounts_section(app_config: AppConfig) -> str:
     """Build a prompt section for explicitly configured sandbox mounts."""
-    try:
-        mounts = AppConfig.current().sandbox.mounts or []
-    except Exception:
-        logger.exception("Failed to load configured sandbox mounts for the lead-agent prompt")
-        return ""
+    mounts = app_config.sandbox.mounts or []
 
     if not mounts:
         return ""
@@ -667,13 +651,20 @@ def _build_custom_mounts_section() -> str:
     return f"\n**Custom Mounted Directories:**\n{mounts_list}\n- If the user needs files outside `/mnt/user-data`, use these absolute container paths directly when they match the requested directory"
 
 
-def apply_prompt_template(subagent_enabled: bool = False, max_concurrent_subagents: int = 3, *, agent_name: str | None = None, available_skills: set[str] | None = None) -> str:
+def apply_prompt_template(
+    app_config: AppConfig,
+    subagent_enabled: bool = False,
+    max_concurrent_subagents: int = 3,
+    *,
+    agent_name: str | None = None,
+    available_skills: set[str] | None = None,
+) -> str:
     # Get memory context
-    memory_context = _get_memory_context(agent_name)
+    memory_context = _get_memory_context(app_config, agent_name)
 
     # Include subagent section only if enabled (from runtime parameter)
     n = max_concurrent_subagents
-    subagent_section = _build_subagent_section(n) if subagent_enabled else ""
+    subagent_section = _build_subagent_section(n, app_config) if subagent_enabled else ""
 
     # Add subagent reminder to critical_reminders if enabled
     subagent_reminder = (
@@ -694,14 +685,14 @@ def apply_prompt_template(subagent_enabled: bool = False, max_concurrent_subagen
     )
 
     # Get skills section
-    skills_section = get_skills_prompt_section(available_skills)
+    skills_section = get_skills_prompt_section(app_config, available_skills)
 
     # Get deferred tools section (tool_search)
-    deferred_tools_section = get_deferred_tools_prompt_section()
+    deferred_tools_section = get_deferred_tools_prompt_section(app_config)
 
     # Build ACP agent section only if ACP agents are configured
-    acp_section = _build_acp_section()
-    custom_mounts_section = _build_custom_mounts_section()
+    acp_section = _build_acp_section(app_config)
+    custom_mounts_section = _build_custom_mounts_section(app_config)
     acp_and_mounts_section = "\n".join(section for section in (acp_section, custom_mounts_section) if section)
 
     # Format the prompt with dynamic skills and memory

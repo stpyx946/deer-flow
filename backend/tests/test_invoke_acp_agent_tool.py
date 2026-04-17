@@ -685,5 +685,5 @@ def test_get_available_tools_includes_invoke_acp_agent_when_agents_configured(mo
         classmethod(lambda cls: ExtensionsConfig(mcp_servers={}, skills={})),
     )
 
-    tools = get_available_tools(include_mcp=True, subagent_enabled=False)
+    tools = get_available_tools(include_mcp=True, subagent_enabled=False, app_config=AppConfig.current())
     assert "invoke_acp_agent" in [tool.name for tool in tools]

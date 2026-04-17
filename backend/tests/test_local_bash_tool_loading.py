@@ -28,7 +28,7 @@ def test_get_available_tools_hides_bash_for_default_local_sandbox(monkeypatch):
         lambda use, _: SimpleNamespace(name="bash" if "bash" in use else "ls"),
     )
 
-    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False)]
+    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False, app_config=AppConfig.current())]
 
     assert "bash" not in names
     assert "ls" in names
@@ -41,7 +41,7 @@ def test_get_available_tools_keeps_bash_when_explicitly_enabled(monkeypatch):
         lambda use, _: SimpleNamespace(name="bash" if "bash" in use else "ls"),
     )
 
-    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False)]
+    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False, app_config=AppConfig.current())]
 
     assert "bash" in names
     assert "ls" in names
@@ -58,7 +58,7 @@ def test_get_available_tools_hides_renamed_host_bash_alias(monkeypatch):
         lambda use, _: SimpleNamespace(name="bash" if "bash_tool" in use else "ls"),
     )
 
-    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False)]
+    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False, app_config=AppConfig.current())]
 
     assert "bash" not in names
     assert "shell" not in names
@@ -76,7 +76,7 @@ def test_get_available_tools_keeps_bash_for_aio_sandbox(monkeypatch):
         lambda use, _: SimpleNamespace(name="bash" if "bash_tool" in use else "ls"),
     )
 
-    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False)]
+    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False, app_config=AppConfig.current())]
 
     assert "bash" in names
     assert "ls" in names

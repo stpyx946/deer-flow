@@ -166,12 +166,10 @@ async def update_mcp_configuration(
         # NOTE: No need to reload/reset cache here - LangGraph Server (separate process)
         # will detect config file changes via mtime and reinitialize MCP tools automatically
 
-        # Reload the configuration. Swap app.state.config (new primitive) and
-        # AppConfig.init() (legacy) so both Depends(get_config) and the not-yet-migrated
-        # AppConfig.current() callers see the new config.
+        # Reload the configuration and swap ``app.state.config`` so subsequent
+        # ``Depends(get_config)`` calls see the refreshed value.
         reloaded = AppConfig.from_file()
         http_request.app.state.config = reloaded
-        AppConfig.init(reloaded)
         return McpConfigResponse(mcp_servers={name: McpServerConfigResponse(**server.model_dump()) for name, server in reloaded.extensions.mcp_servers.items()})
 
     except Exception as e:

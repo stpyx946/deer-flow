@@ -64,39 +64,42 @@ class TestGetCheckpointer:
         from langgraph.checkpoint.memory import InMemorySaver
 
         with patch.object(AppConfig, "current", return_value=_make_config()):
-            cp = get_checkpointer()
+            cp = get_checkpointer(AppConfig.current())
         assert cp is not None
         assert isinstance(cp, InMemorySaver)
 
-    def test_returns_in_memory_saver_when_config_not_found(self):
-        from langgraph.checkpoint.memory import InMemorySaver
+    def test_raises_when_config_file_missing(self):
+        """A missing config.yaml is a deployment error, not a cue to degrade to InMemorySaver.
 
+        Silent degradation would drop persistent-run state on process restart.
+        `get_checkpointer` only falls back to InMemorySaver for the explicit
+        `checkpointer: null` opt-in (test above), not for I/O failure.
+        """
         with patch.object(AppConfig, "current", side_effect=FileNotFoundError):
-            cp = get_checkpointer()
-        assert cp is not None
-        assert isinstance(cp, InMemorySaver)
+            with pytest.raises(FileNotFoundError):
+                get_checkpointer(AppConfig.current())
 
     def test_memory_returns_in_memory_saver(self):
         from langgraph.checkpoint.memory import InMemorySaver
 
         cfg = _make_config(CheckpointerConfig(type="memory"))
         with patch.object(AppConfig, "current", return_value=cfg):
-            cp = get_checkpointer()
+            cp = get_checkpointer(AppConfig.current())
         assert isinstance(cp, InMemorySaver)
 
     def test_memory_singleton(self):
         cfg = _make_config(CheckpointerConfig(type="memory"))
         with patch.object(AppConfig, "current", return_value=cfg):
-            cp1 = get_checkpointer()
-            cp2 = get_checkpointer()
+            cp1 = get_checkpointer(AppConfig.current())
+            cp2 = get_checkpointer(AppConfig.current())
         assert cp1 is cp2
 
     def test_reset_clears_singleton(self):
         cfg = _make_config(CheckpointerConfig(type="memory"))
         with patch.object(AppConfig, "current", return_value=cfg):
-            cp1 = get_checkpointer()
+            cp1 = get_checkpointer(AppConfig.current())
             reset_checkpointer()
-            cp2 = get_checkpointer()
+            cp2 = get_checkpointer(AppConfig.current())
         assert cp1 is not cp2
 
     def test_sqlite_raises_when_package_missing(self):
@@ -107,7 +110,7 @@ class TestGetCheckpointer:
         ):
             reset_checkpointer()
             with pytest.raises(ImportError, match="langgraph-checkpoint-sqlite"):
-                get_checkpointer()
+                get_checkpointer(AppConfig.current())
 
     def test_postgres_raises_when_package_missing(self):
         cfg = _make_config(CheckpointerConfig(type="postgres", connection_string="postgresql://localhost/db"))
@@ -117,7 +120,7 @@ class TestGetCheckpointer:
         ):
             reset_checkpointer()
             with pytest.raises(ImportError, match="langgraph-checkpoint-postgres"):
-                get_checkpointer()
+                get_checkpointer(AppConfig.current())
 
     def test_postgres_raises_when_connection_string_missing(self):
         cfg = _make_config(CheckpointerConfig(type="postgres"))
@@ -130,7 +133,7 @@ class TestGetCheckpointer:
         ):
             reset_checkpointer()
             with pytest.raises(ValueError, match="connection_string is required"):
-                get_checkpointer()
+                get_checkpointer(AppConfig.current())
 
     def test_sqlite_creates_saver(self):
         """SQLite checkpointer is created when package is available."""
@@ -152,7 +155,7 @@ class TestGetCheckpointer:
             patch.dict(sys.modules, {"langgraph.checkpoint.sqlite": mock_module}),
         ):
             reset_checkpointer()
-            cp = get_checkpointer()
+            cp = get_checkpointer(AppConfig.current())
 
         assert cp is mock_saver_instance
         mock_saver_cls.from_conn_string.assert_called_once()
@@ -178,7 +181,7 @@ class TestGetCheckpointer:
             patch.dict(sys.modules, {"langgraph.checkpoint.postgres": mock_pg_module}),
         ):
             reset_checkpointer()
-            cp = get_checkpointer()
+            cp = get_checkpointer(AppConfig.current())
 
         assert cp is mock_saver_instance
         mock_saver_cls.from_conn_string.assert_called_once_with("postgresql://localhost/db")
@@ -214,7 +217,7 @@ class TestAsyncCheckpointer:
                 return_value="/tmp/resolved/test.db",
             ),
         ):
-            async with make_checkpointer() as saver:
+            async with make_checkpointer(AppConfig.current()) as saver:
                 assert saver is mock_saver
 
         mock_to_thread.assert_awaited_once()
@@ -245,7 +248,7 @@ class TestAppConfigLoadsCheckpointer:
 
 class TestClientCheckpointerFallback:
     def test_client_uses_config_checkpointer_when_none_provided(self):
-        """DeerFlowClient._ensure_agent falls back to get_checkpointer() when checkpointer=None."""
+        """DeerFlowClient._ensure_agent falls back to get_checkpointer(AppConfig.current()) when checkpointer=None."""
         # This is a structural test — verifying the fallback path exists.
         cfg = _make_config(CheckpointerConfig(type="memory"))
         assert cfg.checkpointer is not None

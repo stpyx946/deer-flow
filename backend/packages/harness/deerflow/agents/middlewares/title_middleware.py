@@ -8,6 +8,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from deerflow.config.app_config import AppConfig
 from deerflow.config.deer_flow_context import DeerFlowContext
 from deerflow.config.title_config import TitleConfig
 from deerflow.models import create_chat_model
@@ -120,8 +121,9 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
         _, user_msg = self._build_title_prompt(state, title_config)
         return {"title": self._fallback_title(user_msg, title_config)}
 
-    async def _agenerate_title_result(self, state: TitleMiddlewareState, title_config: TitleConfig) -> dict | None:
+    async def _agenerate_title_result(self, state: TitleMiddlewareState, app_config: AppConfig) -> dict | None:
         """Generate a title asynchronously and fall back locally on failure."""
+        title_config = app_config.title
         if not self._should_generate_title(state, title_config):
             return None
 
@@ -129,9 +131,9 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
 
         try:
             if title_config.model_name:
-                model = create_chat_model(name=title_config.model_name, thinking_enabled=False)
+                model = create_chat_model(name=title_config.model_name, thinking_enabled=False, app_config=app_config)
             else:
-                model = create_chat_model(thinking_enabled=False)
+                model = create_chat_model(thinking_enabled=False, app_config=app_config)
             response = await model.ainvoke(prompt, config=self._get_runnable_config())
             title = self._parse_title(response.content, title_config)
             if title:
@@ -146,4 +148,4 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
 
     @override
     async def aafter_model(self, state: TitleMiddlewareState, runtime: Runtime[DeerFlowContext]) -> dict | None:
-        return await self._agenerate_title_result(state, runtime.context.app_config.title)
+        return await self._agenerate_title_result(state, runtime.context.app_config)

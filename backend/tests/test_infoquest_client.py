@@ -7,6 +7,16 @@ from deerflow.community.infoquest import tools
 from deerflow.community.infoquest.infoquest_client import InfoQuestClient
 from deerflow.config.app_config import AppConfig
 
+# --- Phase 2 test helper: injected runtime for community tools ---
+from types import SimpleNamespace as _P2NS
+from deerflow.config.app_config import AppConfig as _P2AppConfig
+from deerflow.config.sandbox_config import SandboxConfig as _P2SandboxConfig
+from deerflow.config.deer_flow_context import DeerFlowContext as _P2Ctx
+_P2_APP_CONFIG = _P2AppConfig(sandbox=_P2SandboxConfig(use="test"))
+_P2_RUNTIME = _P2NS(context=_P2Ctx(app_config=_P2_APP_CONFIG, thread_id="test-thread"))
+# -------------------------------------------------------------------
+
+
 
 class TestInfoQuestClient:
     def test_infoquest_client_initialization(self):
@@ -131,7 +141,7 @@ class TestInfoQuestClient:
         mock_client.web_search.return_value = json.dumps([])
         mock_get_client.return_value = mock_client
 
-        result = tools.web_search_tool.run("test query")
+        result = tools.web_search_tool.func(query="test query", runtime=_P2_RUNTIME)
 
         assert result == json.dumps([])
         mock_get_client.assert_called_once()
@@ -144,7 +154,7 @@ class TestInfoQuestClient:
         mock_client.fetch.return_value = "<html><body>Test content</body></html>"
         mock_get_client.return_value = mock_client
 
-        result = tools.web_fetch_tool.run("https://example.com")
+        result = tools.web_fetch_tool.func(url="https://example.com", runtime=_P2_RUNTIME)
 
         assert result == "# Untitled\n\nTest content"
         mock_get_client.assert_called_once()
@@ -162,7 +172,7 @@ class TestInfoQuestClient:
         ]
         mock_get.return_value = mock_config
 
-        client = tools._get_infoquest_client()
+        client = tools._get_infoquest_client(mock_config)
 
         assert client.search_time_range == 24
         assert client.fetch_time == 10
@@ -322,7 +332,7 @@ class TestImageSearch:
         mock_client.image_search.return_value = json.dumps([{"image_url": "https://example.com/image1.jpg"}])
         mock_get_client.return_value = mock_client
 
-        result = tools.image_search_tool.run({"query": "test query"})
+        result = tools.image_search_tool.func(query="test query", runtime=_P2_RUNTIME)
 
         # Check if result is a valid JSON string
         result_data = json.loads(result)
@@ -341,7 +351,7 @@ class TestImageSearch:
         mock_get_client.return_value = mock_client
 
         # Pass all parameters as a dictionary (extra parameters will be ignored)
-        tools.image_search_tool.run({"query": "sunset", "time_range": 30, "site": "unsplash.com", "image_size": "l"})
+        tools.image_search_tool.func(query="sunset", runtime=_P2_RUNTIME)
 
         mock_get_client.assert_called_once()
         # image_search_tool only passes query to client.image_search

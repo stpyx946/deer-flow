@@ -60,20 +60,21 @@ async def task_tool(
         subagent_type: The type of subagent to use. ALWAYS PROVIDE THIS PARAMETER THIRD.
         max_turns: Optional maximum number of agent turns. Defaults to subagent's configured max.
     """
-    available_subagent_names = get_available_subagent_names()
+    ctx = resolve_context(runtime)
+    available_subagent_names = get_available_subagent_names(ctx.app_config)
 
     # Get subagent configuration
-    config = get_subagent_config(subagent_type)
+    config = get_subagent_config(subagent_type, ctx.app_config)
     if config is None:
         available = ", ".join(available_subagent_names)
         return f"Error: Unknown subagent type '{subagent_type}'. Available: {available}"
-    if subagent_type == "bash" and not is_host_bash_allowed(resolve_context(runtime).app_config):
+    if subagent_type == "bash" and not is_host_bash_allowed(ctx.app_config):
         return f"Error: {LOCAL_BASH_SUBAGENT_DISABLED_MESSAGE}"
 
     # Build config overrides
     overrides: dict = {}
 
-    skills_section = get_skills_prompt_section()
+    skills_section = get_skills_prompt_section(ctx.app_config)
     if skills_section:
         overrides["system_prompt"] = config.system_prompt + "\n\n" + skills_section
 
@@ -107,12 +108,13 @@ async def task_tool(
     from deerflow.tools import get_available_tools
 
     # Subagents should not have subagent tools enabled (prevent recursive nesting)
-    tools = get_available_tools(model_name=parent_model, subagent_enabled=False)
+    tools = get_available_tools(model_name=parent_model, subagent_enabled=False, app_config=ctx.app_config)
 
     # Create executor
     executor = SubagentExecutor(
         config=config,
         tools=tools,
+        app_config=ctx.app_config,
         parent_model=parent_model,
         sandbox_state=sandbox_state,
         thread_data=thread_data,

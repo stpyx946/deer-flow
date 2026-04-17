@@ -43,8 +43,8 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         super().__init__()
         self._lazy_init = lazy_init
 
-    def _acquire_sandbox(self, thread_id: str) -> str:
-        provider = get_sandbox_provider()
+    def _acquire_sandbox(self, thread_id: str, runtime: Runtime[DeerFlowContext]) -> str:
+        provider = get_sandbox_provider(runtime.context.app_config)
         sandbox_id = provider.acquire(thread_id)
         logger.info(f"Acquiring sandbox {sandbox_id}")
         return sandbox_id
@@ -60,7 +60,7 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
             thread_id = runtime.context.thread_id
             if not thread_id:
                 return super().before_agent(state, runtime)
-            sandbox_id = self._acquire_sandbox(thread_id)
+            sandbox_id = self._acquire_sandbox(thread_id, runtime)
             logger.info(f"Assigned sandbox {sandbox_id} to thread {thread_id}")
             return {"sandbox": {"sandbox_id": sandbox_id}}
         return super().before_agent(state, runtime)
@@ -71,7 +71,7 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         if sandbox is not None:
             sandbox_id = sandbox["sandbox_id"]
             logger.info(f"Releasing sandbox {sandbox_id}")
-            get_sandbox_provider().release(sandbox_id)
+            get_sandbox_provider(runtime.context.app_config).release(sandbox_id)
             return None
 
         # No sandbox to release

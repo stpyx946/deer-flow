@@ -20,11 +20,8 @@ LOCAL_BASH_SUBAGENT_DISABLED_MESSAGE = (
 )
 
 
-def uses_local_sandbox_provider(config=None) -> bool:
+def uses_local_sandbox_provider(config: AppConfig) -> bool:
     """Return True when the active sandbox provider is the host-local provider."""
-    if config is None:
-        config = AppConfig.current()
-
     sandbox_cfg = getattr(config, "sandbox", None)
     sandbox_use = getattr(sandbox_cfg, "use", "")
     if sandbox_use in _LOCAL_SANDBOX_PROVIDER_MARKERS:
@@ -32,11 +29,8 @@ def uses_local_sandbox_provider(config=None) -> bool:
     return sandbox_use.endswith(":LocalSandboxProvider") and "deerflow.sandbox.local" in sandbox_use
 
 
-def is_host_bash_allowed(config=None) -> bool:
+def is_host_bash_allowed(config: AppConfig) -> bool:
     """Return whether host bash execution is explicitly allowed."""
-    if config is None:
-        config = AppConfig.current()
-
     sandbox_cfg = getattr(config, "sandbox", None)
     if sandbox_cfg is None:
         return True

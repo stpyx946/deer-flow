@@ -1,9 +1,13 @@
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from deerflow.sandbox.local.local_sandbox import LocalSandbox, PathMapping
 from deerflow.sandbox.sandbox import Sandbox
 from deerflow.sandbox.sandbox_provider import SandboxProvider
+
+if TYPE_CHECKING:
+    from deerflow.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +15,9 @@ _singleton: LocalSandbox | None = None
 
 
 class LocalSandboxProvider(SandboxProvider):
-    def __init__(self):
+    def __init__(self, app_config: "AppConfig"):
         """Initialize the local sandbox provider with path mappings."""
+        self._app_config = app_config
         self._path_mappings = self._setup_path_mappings()
 
     def _setup_path_mappings(self) -> list[PathMapping]:
@@ -29,9 +34,7 @@ class LocalSandboxProvider(SandboxProvider):
 
         # Map skills container path to local skills directory
         try:
-            from deerflow.config.app_config import AppConfig
-
-            config = AppConfig.current()
+            config = self._app_config
             skills_path = config.skills.get_skills_path()
             container_path = config.skills.container_path
 

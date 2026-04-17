@@ -6,12 +6,24 @@ from deerflow.config.memory_config import MemoryConfig
 from deerflow.config.sandbox_config import SandboxConfig
 
 
+
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
 def _make_config(**memory_overrides) -> AppConfig:
     return AppConfig(sandbox=SandboxConfig(use="test"), memory=MemoryConfig(**memory_overrides))
 
 
 def test_queue_add_preserves_existing_correction_flag_for_same_thread() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
 
     with (
         patch.object(AppConfig, "current", return_value=_make_config(enabled=True)),
@@ -26,7 +38,7 @@ def test_queue_add_preserves_existing_correction_flag_for_same_thread() -> None:
 
 
 def test_process_queue_forwards_correction_flag_to_updater() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
     queue._queue = [
         ConversationContext(
             thread_id="thread-1",
@@ -52,7 +64,7 @@ def test_process_queue_forwards_correction_flag_to_updater() -> None:
 
 
 def test_queue_add_preserves_existing_reinforcement_flag_for_same_thread() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
 
     with (
         patch.object(AppConfig, "current", return_value=_make_config(enabled=True)),
@@ -67,7 +79,7 @@ def test_queue_add_preserves_existing_reinforcement_flag_for_same_thread() -> No
 
 
 def test_process_queue_forwards_reinforcement_flag_to_updater() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
     queue._queue = [
         ConversationContext(
             thread_id="thread-1",

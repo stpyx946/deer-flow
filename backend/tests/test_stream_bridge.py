@@ -6,6 +6,7 @@ import re
 import anyio
 import pytest
 
+from deerflow.config.app_config import AppConfig
 from deerflow.runtime import END_SENTINEL, HEARTBEAT_SENTINEL, MemoryStreamBridge, make_stream_bridge
 
 # ---------------------------------------------------------------------------
@@ -331,6 +332,9 @@ async def test_concurrent_tasks_end_sentinel():
 
 @pytest.mark.anyio
 async def test_make_stream_bridge_defaults():
-    """make_stream_bridge() with no config yields a MemoryStreamBridge."""
-    async with make_stream_bridge() as bridge:
+    """make_stream_bridge with a config lacking stream_bridge yields a MemoryStreamBridge."""
+    from deerflow.config.sandbox_config import SandboxConfig
+
+    config = AppConfig(sandbox=SandboxConfig(use="test"))
+    async with make_stream_bridge(config) as bridge:
         assert isinstance(bridge, MemoryStreamBridge)

@@ -3,7 +3,10 @@
 import json
 
 import pytest
+import pytest
 import yaml
+
+pytestmark = pytest.mark.real_from_file
 from pydantic import ValidationError
 
 from deerflow.config.acp_config import ACPAgentConfig

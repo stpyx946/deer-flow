@@ -10,6 +10,9 @@ import yaml
 from fastapi.testclient import TestClient
 
 from deerflow.config.app_config import AppConfig
+from deerflow.config.memory_config import MemoryConfig
+
+_TEST_MEMORY_CONFIG = MemoryConfig()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -335,7 +338,7 @@ class TestMemoryFilePath:
             patch("deerflow.agents.memory.storage.get_paths", return_value=_make_paths(tmp_path)),
             patch.object(AppConfig, "current", return_value=MagicMock(memory=MemoryConfig(storage_path=""))),
         ):
-            storage = FileMemoryStorage()
+            storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             path = storage._get_memory_file_path(None)
         assert path == tmp_path / "memory.json"
 
@@ -348,7 +351,7 @@ class TestMemoryFilePath:
             patch("deerflow.agents.memory.storage.get_paths", return_value=_make_paths(tmp_path)),
             patch.object(AppConfig, "current", return_value=MagicMock(memory=MemoryConfig(storage_path=""))),
         ):
-            storage = FileMemoryStorage()
+            storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             path = storage._get_memory_file_path("code-reviewer")
         assert path == tmp_path / "agents" / "code-reviewer" / "memory.json"
 
@@ -360,7 +363,7 @@ class TestMemoryFilePath:
             patch("deerflow.agents.memory.storage.get_paths", return_value=_make_paths(tmp_path)),
             patch.object(AppConfig, "current", return_value=MagicMock(memory=MemoryConfig(storage_path=""))),
         ):
-            storage = FileMemoryStorage()
+            storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             path_global = storage._get_memory_file_path(None)
             path_a = storage._get_memory_file_path("agent-a")
             path_b = storage._get_memory_file_path("agent-b")

@@ -4,10 +4,12 @@ import logging
 import os
 import stat
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.gateway.authz import require_permission
+from app.gateway.deps import get_config
+from deerflow.config.app_config import AppConfig
 from deerflow.config.paths import get_paths
 from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
@@ -61,6 +63,7 @@ async def upload_files(
     thread_id: str,
     request: Request,
     files: list[UploadFile] = File(...),
+    app_config: AppConfig = Depends(get_config),
 ) -> UploadResponse:
     """Upload multiple files to a thread's uploads directory."""
     if not files:
@@ -73,7 +76,7 @@ async def upload_files(
     sandbox_uploads = get_paths().sandbox_uploads_dir(thread_id, user_id=get_effective_user_id())
     uploaded_files = []
 
-    sandbox_provider = get_sandbox_provider()
+    sandbox_provider = get_sandbox_provider(app_config)
     sandbox_id = sandbox_provider.acquire(thread_id)
     sandbox = sandbox_provider.get(sandbox_id)
 

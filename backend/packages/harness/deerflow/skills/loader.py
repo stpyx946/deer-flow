@@ -1,9 +1,13 @@
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .parser import parse_skill_file
 from .types import Skill
+
+if TYPE_CHECKING:
+    from deerflow.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +26,12 @@ def get_skills_root_path() -> Path:
     return skills_dir
 
 
-def load_skills(skills_path: Path | None = None, use_config: bool = True, enabled_only: bool = False) -> list[Skill]:
+def load_skills(
+    app_config: "AppConfig | None" = None,
+    *,
+    skills_path: Path | None = None,
+    enabled_only: bool = False,
+) -> list[Skill]:
     """
     Load all skills from the skills directory.
 
@@ -30,25 +39,19 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
     to extract metadata. The enabled state is determined by the skills_state_config.json file.
 
     Args:
-        skills_path: Optional custom path to skills directory.
-                     If not provided and use_config is True, uses path from config.
-                     Otherwise defaults to deer-flow/skills
-        use_config: Whether to load skills path from config (default: True)
+        app_config: Application config used to resolve the configured skills
+                    directory. Ignored when ``skills_path`` is supplied.
+        skills_path: Explicit override for the skills directory. When both
+                     ``skills_path`` and ``app_config`` are omitted the
+                     default repository layout is used (``deer-flow/skills``).
         enabled_only: If True, only return enabled skills (default: False)
 
     Returns:
         List of Skill objects, sorted by name
     """
     if skills_path is None:
-        if use_config:
-            try:
-                from deerflow.config.app_config import AppConfig
-
-                config = AppConfig.current()
-                skills_path = config.skills.get_skills_path()
-            except Exception:
-                # Fallback to default if config fails
-                skills_path = get_skills_root_path()
+        if app_config is not None:
+            skills_path = app_config.skills.get_skills_path()
         else:
             skills_path = get_skills_root_path()
 

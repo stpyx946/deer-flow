@@ -38,7 +38,7 @@ from deerflow.agents.thread_state import ThreadState
 from deerflow.config.agents_config import AGENT_NAME_PATTERN
 from deerflow.config.app_config import AppConfig
 from deerflow.config.deer_flow_context import DeerFlowContext
-from deerflow.config.extensions_config import ExtensionsConfig, SkillStateConfig
+from deerflow.config.extensions_config import ExtensionsConfig
 from deerflow.config.paths import get_paths
 from deerflow.models import create_chat_model
 from deerflow.runtime.user_context import get_effective_user_id
@@ -151,16 +151,15 @@ class DeerFlowClient:
         # Constructor-captured config: the client owns its AppConfig for its lifetime.
         # Multiple clients with different configs do not contend.
         #
-        # Priority: explicit ``config=`` > explicit ``config_path=`` > AppConfig.current().
-        # The third tier preserves backward compatibility with callers that relied on
-        # the process-global (tests via the conftest autouse fixture). After P2-10
-        # removes AppConfig.current(), this fallback will require an explicit choice.
+        # Priority: explicit ``config=`` > explicit ``config_path=`` > ``AppConfig.from_file()``
+        # with default path resolution. There is no ambient global fallback; if
+        # config.yaml cannot be located, ``from_file`` raises loudly.
         if config is not None:
             self._app_config = config
         elif config_path is not None:
             self._app_config = AppConfig.from_file(config_path)
         else:
-            self._app_config = AppConfig.current()
+            self._app_config = AppConfig.from_file()
 
         if agent_name is not None and not AGENT_NAME_PATTERN.match(agent_name):
             raise ValueError(f"Invalid agent name '{agent_name}'. Must match pattern: {AGENT_NAME_PATTERN.pattern}")
@@ -254,10 +253,11 @@ class DeerFlowClient:
         max_concurrent_subagents = cfg.get("max_concurrent_subagents", 3)
 
         kwargs: dict[str, Any] = {
-            "model": create_chat_model(name=model_name, thinking_enabled=thinking_enabled),
+            "model": create_chat_model(name=model_name, thinking_enabled=thinking_enabled, app_config=self._app_config),
             "tools": self._get_tools(model_name=model_name, subagent_enabled=subagent_enabled),
             "middleware": _build_middlewares(self._app_config, config, model_name=model_name, agent_name=self._agent_name, custom_middlewares=self._middlewares),
             "system_prompt": apply_prompt_template(
+                self._app_config,
                 subagent_enabled=subagent_enabled,
                 max_concurrent_subagents=max_concurrent_subagents,
                 agent_name=self._agent_name,
@@ -269,7 +269,7 @@ class DeerFlowClient:
         if checkpointer is None:
             from deerflow.runtime.checkpointer import get_checkpointer
 
-            checkpointer = get_checkpointer()
+            checkpointer = get_checkpointer(self._app_config)
         if checkpointer is not None:
             kwargs["checkpointer"] = checkpointer
 
@@ -277,12 +277,11 @@ class DeerFlowClient:
         self._agent_config_key = key
         logger.info("Agent created: agent_name=%s, model=%s, thinking=%s", self._agent_name, model_name, thinking_enabled)
 
-    @staticmethod
-    def _get_tools(*, model_name: str | None, subagent_enabled: bool):
+    def _get_tools(self, *, model_name: str | None, subagent_enabled: bool):
         """Lazy import to avoid circular dependency at module level."""
         from deerflow.tools import get_available_tools
 
-        return get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled)
+        return get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled, app_config=self._app_config)
 
     @staticmethod
     def _serialize_tool_calls(tool_calls) -> list[dict]:
@@ -403,7 +402,7 @@ class DeerFlowClient:
         if checkpointer is None:
             from deerflow.runtime.checkpointer.provider import get_checkpointer
 
-            checkpointer = get_checkpointer()
+            checkpointer = get_checkpointer(self._app_config)
 
         thread_info_map = {}
 
@@ -458,7 +457,7 @@ class DeerFlowClient:
         if checkpointer is None:
             from deerflow.runtime.checkpointer.provider import get_checkpointer
 
-            checkpointer = get_checkpointer()
+            checkpointer = get_checkpointer(self._app_config)
 
         config = {"configurable": {"thread_id": thread_id}}
         checkpoints = []
@@ -782,7 +781,7 @@ class DeerFlowClient:
                     "category": s.category,
                     "enabled": s.enabled,
                 }
-                for s in load_skills(enabled_only=enabled_only)
+                for s in load_skills(self._app_config, enabled_only=enabled_only)
             ]
         }
 
@@ -794,19 +793,19 @@ class DeerFlowClient:
         """
         from deerflow.agents.memory.updater import get_memory_data
 
-        return get_memory_data(user_id=get_effective_user_id())
+        return get_memory_data(self._app_config.memory, user_id=get_effective_user_id())
 
     def export_memory(self) -> dict:
         """Export current memory data for backup or transfer."""
         from deerflow.agents.memory.updater import get_memory_data
 
-        return get_memory_data(user_id=get_effective_user_id())
+        return get_memory_data(self._app_config.memory, user_id=get_effective_user_id())
 
     def import_memory(self, memory_data: dict) -> dict:
         """Import and persist full memory data."""
         from deerflow.agents.memory.updater import import_memory_data
 
-        return import_memory_data(memory_data, user_id=get_effective_user_id())
+        return import_memory_data(self._app_config.memory, memory_data, user_id=get_effective_user_id())
 
     def get_model(self, name: str) -> dict | None:
         """Get a specific model's configuration by name.
@@ -894,7 +893,7 @@ class DeerFlowClient:
         """
         from deerflow.skills.loader import load_skills
 
-        skill = next((s for s in load_skills(enabled_only=False) if s.name == name), None)
+        skill = next((s for s in load_skills(self._app_config, enabled_only=False) if s.name == name), None)
         if skill is None:
             return None
         return {
@@ -921,7 +920,7 @@ class DeerFlowClient:
         """
         from deerflow.skills.loader import load_skills
 
-        skills = load_skills(enabled_only=False)
+        skills = load_skills(self._app_config, enabled_only=False)
         skill = next((s for s in skills if s.name == name), None)
         if skill is None:
             raise ValueError(f"Skill '{name}' not found")
@@ -930,12 +929,16 @@ class DeerFlowClient:
         if config_path is None:
             raise FileNotFoundError("Cannot locate extensions_config.json. Set DEER_FLOW_EXTENSIONS_CONFIG_PATH or ensure it exists in the project root.")
 
+        # Do not mutate self._app_config (frozen value). Compose the new
+        # skills state in a fresh dict, write it to disk, and let _reload_config()
+        # below rebuild AppConfig from the updated file.
         ext = self._app_config.extensions
-        ext.skills[name] = SkillStateConfig(enabled=enabled)
+        new_skills = {n: {"enabled": sc.enabled} for n, sc in ext.skills.items()}
+        new_skills[name] = {"enabled": enabled}
 
         config_data = {
             "mcpServers": {n: s.model_dump() for n, s in ext.mcp_servers.items()},
-            "skills": {n: {"enabled": sc.enabled} for n, sc in ext.skills.items()},
+            "skills": new_skills,
         }
 
         self._atomic_write_json(config_path, config_data)
@@ -944,7 +947,7 @@ class DeerFlowClient:
         self._agent_config_key = None
         self._reload_config()
 
-        updated = next((s for s in load_skills(enabled_only=False) if s.name == name), None)
+        updated = next((s for s in load_skills(self._app_config, enabled_only=False) if s.name == name), None)
         if updated is None:
             raise RuntimeError(f"Skill '{name}' disappeared after update")
         return {
@@ -982,25 +985,25 @@ class DeerFlowClient:
         """
         from deerflow.agents.memory.updater import reload_memory_data
 
-        return reload_memory_data(user_id=get_effective_user_id())
+        return reload_memory_data(self._app_config.memory, user_id=get_effective_user_id())
 
     def clear_memory(self) -> dict:
         """Clear all persisted memory data."""
         from deerflow.agents.memory.updater import clear_memory_data
 
-        return clear_memory_data(user_id=get_effective_user_id())
+        return clear_memory_data(self._app_config.memory, user_id=get_effective_user_id())
 
     def create_memory_fact(self, content: str, category: str = "context", confidence: float = 0.5) -> dict:
         """Create a single fact manually."""
         from deerflow.agents.memory.updater import create_memory_fact
 
-        return create_memory_fact(content=content, category=category, confidence=confidence)
+        return create_memory_fact(self._app_config.memory, content=content, category=category, confidence=confidence)
 
     def delete_memory_fact(self, fact_id: str) -> dict:
         """Delete a single fact from memory by fact id."""
         from deerflow.agents.memory.updater import delete_memory_fact
 
-        return delete_memory_fact(fact_id)
+        return delete_memory_fact(self._app_config.memory, fact_id)
 
     def update_memory_fact(
         self,
@@ -1013,6 +1016,7 @@ class DeerFlowClient:
         from deerflow.agents.memory.updater import update_memory_fact
 
         return update_memory_fact(
+            self._app_config.memory,
             fact_id=fact_id,
             content=content,
             category=category,

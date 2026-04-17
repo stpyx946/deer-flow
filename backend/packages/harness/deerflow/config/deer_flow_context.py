@@ -30,43 +30,26 @@ class DeerFlowContext:
 
 
 def resolve_context(runtime: Any) -> DeerFlowContext:
-    """Extract or construct DeerFlowContext from runtime.
+    """Return the typed DeerFlowContext that the runtime carries.
 
-    Gateway/Client paths: runtime.context is already DeerFlowContext → return directly.
-    LangGraph Server / legacy dict path: construct from dict context or configurable fallback.
+    Gateway mode (``DeerFlowClient``, ``run_agent``) always attaches a typed
+    ``DeerFlowContext`` via ``agent.astream(context=...)``; the LangGraph
+    Server path uses ``langgraph.json`` registration where the top-level
+    ``make_lead_agent`` loads ``AppConfig`` from disk itself, so we still
+    arrive here with a typed context.
+
+    Only the dict/None shapes that legacy tests used to exercise would fall
+    through this function; we now reject them loudly instead of papering
+    over the missing context with an ambient ``AppConfig`` lookup.
     """
     ctx = getattr(runtime, "context", None)
     if isinstance(ctx, DeerFlowContext):
         return ctx
 
-    from deerflow.config.app_config import AppConfig
-
-    # Try dict context first (legacy path, tests), then configurable
-    if isinstance(ctx, dict):
-        thread_id = ctx.get("thread_id", "")
-        if not thread_id:
-            logger.warning("resolve_context: dict context has empty thread_id — may cause incorrect path resolution")
-        return DeerFlowContext(
-            app_config=AppConfig.current(),
-            thread_id=thread_id,
-            agent_name=ctx.get("agent_name"),
-        )
-
-    # No context at all — fall back to LangGraph configurable
-    try:
-        from langgraph.config import get_config
-
-        cfg = get_config().get("configurable", {})
-    except RuntimeError:
-        # Outside runnable context (e.g. unit tests)
-        cfg = {}
-
-    thread_id = cfg.get("thread_id", "")
-    if not thread_id:
-        logger.warning("resolve_context: falling back to empty thread_id — no DeerFlowContext or configurable found")
-
-    return DeerFlowContext(
-        app_config=AppConfig.current(),
-        thread_id=thread_id,
-        agent_name=cfg.get("agent_name"),
+    raise RuntimeError(
+        "resolve_context: runtime.context is not a DeerFlowContext "
+        "(got type %s). Every entry point must attach one at invoke time — "
+        "Gateway/Client via agent.astream(context=DeerFlowContext(...)), "
+        "LangGraph Server via the make_lead_agent boundary that loads "
+        "AppConfig.from_file()." % type(ctx).__name__
     )

@@ -11,9 +11,9 @@ from deerflow.config.sandbox_config import SandboxConfig
 skill_manage_module = importlib.import_module("deerflow.tools.skill_manage_tool")
 
 
-def _make_context(thread_id: str) -> DeerFlowContext:
+def _make_context(thread_id: str, app_config: object | None = None) -> DeerFlowContext:
     return DeerFlowContext(
-        app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+        app_config=app_config if app_config is not None else AppConfig(sandbox=SandboxConfig(use="test")),
         thread_id=thread_id,
     )
 
@@ -37,13 +37,13 @@ def test_skill_manage_create_and_patch(monkeypatch, tmp_path):
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
     refresh_calls = []
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         refresh_calls.append("refresh")
 
     monkeypatch.setattr(skill_manage_module, "refresh_skills_system_prompt_cache_async", _refresh)
     monkeypatch.setattr(skill_manage_module, "scan_skill_content", lambda *args, **kwargs: _async_result("allow", "ok"))
 
-    runtime = SimpleNamespace(context=_make_context("thread-1"), config={"configurable": {"thread_id": "thread-1"}})
+    runtime = SimpleNamespace(context=_make_context("thread-1", config), config={"configurable": {"thread_id": "thread-1"}})
 
     result = anyio.run(
         skill_manage_module.skill_manage_tool.coroutine,
@@ -78,13 +78,13 @@ def test_skill_manage_patch_replaces_single_occurrence_by_default(monkeypatch, t
     )
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         return None
 
     monkeypatch.setattr(skill_manage_module, "refresh_skills_system_prompt_cache_async", _refresh)
     monkeypatch.setattr(skill_manage_module, "scan_skill_content", lambda *args, **kwargs: _async_result("allow", "ok"))
 
-    runtime = SimpleNamespace(context=_make_context("thread-1"), config={"configurable": {"thread_id": "thread-1"}})
+    runtime = SimpleNamespace(context=_make_context("thread-1", config), config={"configurable": {"thread_id": "thread-1"}})
     content = _skill_content("demo-skill", "Demo skill") + "\nRepeated: Demo skill\n"
 
     anyio.run(skill_manage_module.skill_manage_tool.coroutine, runtime, "create", "demo-skill", content)
@@ -116,7 +116,7 @@ def test_skill_manage_rejects_public_skill_patch(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
 
-    runtime = SimpleNamespace(context=_make_context(""), config={"configurable": {}})
+    runtime = SimpleNamespace(context=_make_context("", config), config={"configurable": {}})
 
     with pytest.raises(ValueError, match="built-in skill"):
         anyio.run(
@@ -140,13 +140,13 @@ def test_skill_manage_sync_wrapper_supported(monkeypatch, tmp_path):
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
     refresh_calls = []
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         refresh_calls.append("refresh")
 
     monkeypatch.setattr(skill_manage_module, "refresh_skills_system_prompt_cache_async", _refresh)
     monkeypatch.setattr(skill_manage_module, "scan_skill_content", lambda *args, **kwargs: _async_result("allow", "ok"))
 
-    runtime = SimpleNamespace(context=_make_context("thread-sync"), config={"configurable": {"thread_id": "thread-sync"}})
+    runtime = SimpleNamespace(context=_make_context("thread-sync", config), config={"configurable": {"thread_id": "thread-sync"}})
     result = skill_manage_module.skill_manage_tool.func(
         runtime=runtime,
         action="create",
@@ -166,13 +166,13 @@ def test_skill_manage_rejects_support_path_traversal(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         return None
 
     monkeypatch.setattr(skill_manage_module, "refresh_skills_system_prompt_cache_async", _refresh)
     monkeypatch.setattr(skill_manage_module, "scan_skill_content", lambda *args, **kwargs: _async_result("allow", "ok"))
 
-    runtime = SimpleNamespace(context=_make_context("thread-1"), config={"configurable": {"thread_id": "thread-1"}})
+    runtime = SimpleNamespace(context=_make_context("thread-1", config), config={"configurable": {"thread_id": "thread-1"}})
     anyio.run(skill_manage_module.skill_manage_tool.coroutine, runtime, "create", "demo-skill", _skill_content("demo-skill"))
 
     with pytest.raises(ValueError, match="parent-directory traversal|selected support directory"):

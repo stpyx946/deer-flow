@@ -100,7 +100,7 @@ _store: BaseStore | None = None
 _store_ctx = None  # open context manager keeping the connection alive
 
 
-def get_store() -> BaseStore:
+def get_store(app_config: AppConfig) -> BaseStore:
     """Return the global sync Store singleton, creating it on first call.
 
     Returns an :class:`~langgraph.store.memory.InMemoryStore` when no
@@ -115,10 +115,10 @@ def get_store() -> BaseStore:
     if _store is not None:
         return _store
 
-    try:
-        config = AppConfig.current().checkpointer
-    except (LookupError, FileNotFoundError):
-        config = None
+    # See matching comment in checkpointer/provider.py: a missing config.yaml
+    # is a deployment error, not a cue to silently pick InMemoryStore. Only
+    # the explicit "no checkpointer section" path falls through to memory.
+    config = app_config.checkpointer
 
     if config is None:
         from langgraph.store.memory import InMemoryStore
@@ -154,26 +154,25 @@ def reset_store() -> None:
 
 
 @contextlib.contextmanager
-def store_context() -> Iterator[BaseStore]:
+def store_context(app_config: AppConfig) -> Iterator[BaseStore]:
     """Sync context manager that yields a Store and cleans up on exit.
 
     Unlike :func:`get_store`, this does **not** cache the instance — each
     ``with`` block creates and destroys its own connection.  Use it in CLI
     scripts or tests where you want deterministic cleanup::
 
-        with store_context() as store:
+        with store_context(app_config) as store:
             store.put(("threads",), thread_id, {...})
 
     Yields an :class:`~langgraph.store.memory.InMemoryStore` when no
     checkpointer is configured in *config.yaml*.
     """
-    config = AppConfig.current()
-    if config.checkpointer is None:
+    if app_config.checkpointer is None:
         from langgraph.store.memory import InMemoryStore
 
         logger.warning("No 'checkpointer' section in config.yaml — using InMemoryStore for the store. Thread list will be lost on server restart. Configure a sqlite or postgres backend for persistence.")
         yield InMemoryStore()
         return
 
-    with _sync_store_cm(config.checkpointer) as store:
+    with _sync_store_cm(app_config.checkpointer) as store:
         yield store

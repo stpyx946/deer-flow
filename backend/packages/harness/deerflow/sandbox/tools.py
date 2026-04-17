@@ -40,58 +40,43 @@ _DEFAULT_GREP_MAX_RESULTS = 100
 _MAX_GREP_MAX_RESULTS = 500
 
 
-def _get_skills_container_path() -> str:
-    """Get the skills container path from config, with fallback to default.
-
-    Result is cached after the first successful config load.  If config loading
-    fails the default is returned *without* caching so that a later call can
-    pick up the real value once the config is available.
-    """
-    cached = getattr(_get_skills_container_path, "_cached", None)
-    if cached is not None:
-        return cached
-    try:
-        value = AppConfig.current().skills.container_path
-        _get_skills_container_path._cached = value  # type: ignore[attr-defined]
-        return value
-    except Exception:
+def _get_skills_container_path(app_config: AppConfig) -> str:
+    """Get the skills container path from config, with fallback to default."""
+    skills_cfg = getattr(app_config, "skills", None)
+    if skills_cfg is None:
         return _DEFAULT_SKILLS_CONTAINER_PATH
+    return skills_cfg.container_path
 
 
-def _get_skills_host_path() -> str | None:
+def _get_skills_host_path(app_config: AppConfig) -> str | None:
     """Get the skills host filesystem path from config.
 
-    Returns None if the skills directory does not exist or config cannot be
-    loaded.  Only successful lookups are cached; failures are retried on the
-    next call so that a transiently unavailable skills directory does not
-    permanently disable skills access.
+    Returns None if the skills directory does not exist or is not configured.
     """
-    cached = getattr(_get_skills_host_path, "_cached", None)
-    if cached is not None:
-        return cached
+    skills_cfg = getattr(app_config, "skills", None)
+    if skills_cfg is None:
+        return None
     try:
-        config = AppConfig.current()
-        skills_path = config.skills.get_skills_path()
-        if skills_path.exists():
-            value = str(skills_path)
-            _get_skills_host_path._cached = value  # type: ignore[attr-defined]
-            return value
+        skills_path = skills_cfg.get_skills_path()
     except Exception:
-        pass
+        return None
+    if skills_path.exists():
+        return str(skills_path)
     return None
 
 
-def _is_skills_path(path: str) -> bool:
+def _is_skills_path(path: str, app_config: AppConfig) -> bool:
     """Check if a path is under the skills container path."""
-    skills_prefix = _get_skills_container_path()
+    skills_prefix = _get_skills_container_path(app_config)
     return path == skills_prefix or path.startswith(f"{skills_prefix}/")
 
 
-def _resolve_skills_path(path: str) -> str:
+def _resolve_skills_path(path: str, app_config: AppConfig) -> str:
     """Resolve a virtual skills path to a host filesystem path.
 
     Args:
         path: Virtual skills path (e.g. /mnt/skills/public/bootstrap/SKILL.md)
+        app_config: Resolved application config.
 
     Returns:
         Resolved host path.
@@ -99,8 +84,8 @@ def _resolve_skills_path(path: str) -> str:
     Raises:
         FileNotFoundError: If skills directory is not configured or doesn't exist.
     """
-    skills_container = _get_skills_container_path()
-    skills_host = _get_skills_host_path()
+    skills_container = _get_skills_container_path(app_config)
+    skills_host = _get_skills_host_path(app_config)
     if skills_host is None:
         raise FileNotFoundError(f"Skills directory not available for path: {path}")
 
@@ -116,46 +101,31 @@ def _is_acp_workspace_path(path: str) -> bool:
     return path == _ACP_WORKSPACE_VIRTUAL_PATH or path.startswith(f"{_ACP_WORKSPACE_VIRTUAL_PATH}/")
 
 
-def _get_custom_mounts():
+def _get_custom_mounts(app_config: AppConfig):
     """Get custom volume mounts from sandbox config.
 
-    Result is cached after the first successful config load.  If config loading
-    fails an empty list is returned *without* caching so that a later call can
-    pick up the real value once the config is available.
+    Only includes mounts whose host_path exists, consistent with
+    ``LocalSandboxProvider._setup_path_mappings()`` which also filters by
+    ``host_path.exists()``.
     """
-    cached = getattr(_get_custom_mounts, "_cached", None)
-    if cached is not None:
-        return cached
-    try:
-        from pathlib import Path
-
-        config = AppConfig.current()
-        mounts = []
-        if config.sandbox and config.sandbox.mounts:
-            # Only include mounts whose host_path exists, consistent with
-            # LocalSandboxProvider._setup_path_mappings() which also filters
-            # by host_path.exists().
-            mounts = [m for m in config.sandbox.mounts if Path(m.host_path).exists()]
-        _get_custom_mounts._cached = mounts  # type: ignore[attr-defined]
-        return mounts
-    except Exception:
-        # If config loading fails, return an empty list without caching so that
-        # a later call can retry once the config is available.
+    sandbox_cfg = getattr(app_config, "sandbox", None)
+    if sandbox_cfg is None or not sandbox_cfg.mounts:
         return []
+    return [m for m in sandbox_cfg.mounts if Path(m.host_path).exists()]
 
 
-def _is_custom_mount_path(path: str) -> bool:
+def _is_custom_mount_path(path: str, app_config: AppConfig) -> bool:
     """Check if path is under a custom mount container_path."""
-    for mount in _get_custom_mounts():
+    for mount in _get_custom_mounts(app_config):
         if path == mount.container_path or path.startswith(f"{mount.container_path}/"):
             return True
     return False
 
 
-def _get_custom_mount_for_path(path: str):
+def _get_custom_mount_for_path(path: str, app_config: AppConfig):
     """Get the mount config matching this path (longest prefix first)."""
     best = None
-    for mount in _get_custom_mounts():
+    for mount in _get_custom_mounts(app_config):
         if path == mount.container_path or path.startswith(f"{mount.container_path}/"):
             if best is None or len(mount.container_path) > len(best.container_path):
                 best = mount
@@ -266,42 +236,40 @@ def _resolve_acp_workspace_path(path: str, thread_id: str | None = None) -> str:
     return str(resolved_path)
 
 
-def _get_mcp_allowed_paths() -> list[str]:
+def _get_mcp_allowed_paths(app_config: AppConfig) -> list[str]:
     """Get the list of allowed paths from MCP config for file system server."""
-    allowed_paths = []
-    try:
-        extensions_config = AppConfig.current().extensions
+    allowed_paths: list[str] = []
+    extensions_config = getattr(app_config, "extensions", None)
+    if extensions_config is None:
+        return allowed_paths
 
-        for _, server in extensions_config.mcp_servers.items():
-            if not server.enabled:
-                continue
+    for _, server in extensions_config.mcp_servers.items():
+        if not server.enabled:
+            continue
 
-            # Only check the filesystem server
-            args = server.args or []
-            # Check if args has server-filesystem package
-            has_filesystem = any("server-filesystem" in arg for arg in args)
-            if not has_filesystem:
-                continue
-            # Unpack the allowed file system paths in config
-            for arg in args:
-                if not arg.startswith("-") and arg.startswith("/"):
-                    allowed_paths.append(arg.rstrip("/") + "/")
-
-    except Exception:
-        pass
+        # Only check the filesystem server
+        args = server.args or []
+        # Check if args has server-filesystem package
+        has_filesystem = any("server-filesystem" in arg for arg in args)
+        if not has_filesystem:
+            continue
+        # Unpack the allowed file system paths in config
+        for arg in args:
+            if not arg.startswith("-") and arg.startswith("/"):
+                allowed_paths.append(arg.rstrip("/") + "/")
 
     return allowed_paths
 
 
-def _get_tool_config_int(name: str, key: str, default: int) -> int:
+def _get_tool_config_int(app_config: AppConfig, name: str, key: str, default: int) -> int:
     try:
-        tool_config = AppConfig.current().get_tool_config(name)
-        if tool_config is not None and key in tool_config.model_extra:
-            value = tool_config.model_extra.get(key)
-            if isinstance(value, int):
-                return value
+        tool_config = app_config.get_tool_config(name)
     except Exception:
-        pass
+        return default
+    if tool_config is not None and key in tool_config.model_extra:
+        value = tool_config.model_extra.get(key)
+        if isinstance(value, int):
+            return value
     return default
 
 
@@ -311,23 +279,23 @@ def _clamp_max_results(value: int, *, default: int, upper_bound: int) -> int:
     return min(value, upper_bound)
 
 
-def _resolve_max_results(name: str, requested: int, *, default: int, upper_bound: int) -> int:
+def _resolve_max_results(app_config: AppConfig, name: str, requested: int, *, default: int, upper_bound: int) -> int:
     requested_max_results = _clamp_max_results(requested, default=default, upper_bound=upper_bound)
     configured_max_results = _clamp_max_results(
-        _get_tool_config_int(name, "max_results", default),
+        _get_tool_config_int(app_config, name, "max_results", default),
         default=default,
         upper_bound=upper_bound,
     )
     return min(requested_max_results, configured_max_results)
 
 
-def _resolve_local_read_path(path: str, thread_data: ThreadDataState) -> str:
-    validate_local_tool_path(path, thread_data, read_only=True)
-    if _is_skills_path(path):
-        return _resolve_skills_path(path)
+def _resolve_local_read_path(path: str, thread_data: ThreadDataState, app_config: AppConfig) -> str:
+    validate_local_tool_path(path, thread_data, app_config, read_only=True)
+    if _is_skills_path(path, app_config):
+        return _resolve_skills_path(path, app_config)
     if _is_acp_workspace_path(path):
         return _resolve_acp_workspace_path(path, _extract_thread_id_from_thread_data(thread_data))
-    return _resolve_and_validate_user_data_path(path, thread_data)
+    return _resolve_and_validate_user_data_path(path, thread_data, app_config)
 
 
 def _format_glob_results(root_path: str, matches: list[str], truncated: bool) -> str:
@@ -373,7 +341,11 @@ def _join_path_preserving_style(base: str, relative: str) -> str:
     return f"{stripped_base}{separator}{normalized_relative}"
 
 
-def _sanitize_error(error: Exception, runtime: "ToolRuntime[ContextT, ThreadState] | None" = None) -> str:
+def _sanitize_error(
+    error: Exception,
+    runtime: "ToolRuntime[ContextT, ThreadState] | None" = None,
+    app_config: AppConfig | None = None,
+) -> str:
     """Sanitize an error message to avoid leaking host filesystem paths.
 
     In local-sandbox mode, resolved host paths in the error string are masked
@@ -382,8 +354,12 @@ def _sanitize_error(error: Exception, runtime: "ToolRuntime[ContextT, ThreadStat
     """
     msg = f"{type(error).__name__}: {error}"
     if runtime is not None and is_local_sandbox(runtime):
-        thread_data = get_thread_data(runtime)
-        msg = mask_local_paths_in_output(msg, thread_data)
+        if app_config is None:
+            ctx = getattr(runtime, "context", None)
+            app_config = getattr(ctx, "app_config", None)
+        if app_config is not None:
+            thread_data = get_thread_data(runtime)
+            msg = mask_local_paths_in_output(msg, thread_data, app_config)
     return msg
 
 
@@ -453,7 +429,7 @@ def _thread_actual_to_virtual_mappings(thread_data: ThreadDataState) -> dict[str
     return {actual: virtual for virtual, actual in _thread_virtual_to_actual_mappings(thread_data).items()}
 
 
-def mask_local_paths_in_output(output: str, thread_data: ThreadDataState | None) -> str:
+def mask_local_paths_in_output(output: str, thread_data: ThreadDataState | None, app_config: AppConfig) -> str:
     """Mask host absolute paths from local sandbox output using virtual paths.
 
     Handles user-data paths (per-thread), skills paths, and ACP workspace paths (global).
@@ -461,8 +437,8 @@ def mask_local_paths_in_output(output: str, thread_data: ThreadDataState | None)
     result = output
 
     # Mask skills host paths
-    skills_host = _get_skills_host_path()
-    skills_container = _get_skills_container_path()
+    skills_host = _get_skills_host_path(app_config)
+    skills_container = _get_skills_container_path(app_config)
     if skills_host:
         raw_base = str(Path(skills_host))
         resolved_base = str(Path(skills_host).resolve())
@@ -536,7 +512,13 @@ def _reject_path_traversal(path: str) -> None:
             raise PermissionError("Access denied: path traversal detected")
 
 
-def validate_local_tool_path(path: str, thread_data: ThreadDataState | None, *, read_only: bool = False) -> None:
+def validate_local_tool_path(
+    path: str,
+    thread_data: ThreadDataState | None,
+    app_config: AppConfig,
+    *,
+    read_only: bool = False,
+) -> None:
     """Validate that a virtual path is allowed for local-sandbox access.
 
     This function is a security gate — it checks whether *path* may be
@@ -565,7 +547,7 @@ def validate_local_tool_path(path: str, thread_data: ThreadDataState | None, *, 
     _reject_path_traversal(path)
 
     # Skills paths — read-only access only
-    if _is_skills_path(path):
+    if _is_skills_path(path, app_config):
         if not read_only:
             raise PermissionError(f"Write access to skills path is not allowed: {path}")
         return
@@ -581,13 +563,13 @@ def validate_local_tool_path(path: str, thread_data: ThreadDataState | None, *, 
         return
 
     # Custom mount paths — respect read_only config
-    if _is_custom_mount_path(path):
-        mount = _get_custom_mount_for_path(path)
+    if _is_custom_mount_path(path, app_config):
+        mount = _get_custom_mount_for_path(path, app_config)
         if mount and mount.read_only and not read_only:
             raise PermissionError(f"Write access to read-only mount is not allowed: {path}")
         return
 
-    raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/, {_get_skills_container_path()}/, {_ACP_WORKSPACE_VIRTUAL_PATH}/, or configured mount paths are allowed")
+    raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/, {_get_skills_container_path(app_config)}/, {_ACP_WORKSPACE_VIRTUAL_PATH}/, or configured mount paths are allowed")
 
 
 def _validate_resolved_user_data_path(resolved: Path, thread_data: ThreadDataState) -> None:
@@ -618,18 +600,23 @@ def _validate_resolved_user_data_path(resolved: Path, thread_data: ThreadDataSta
     raise PermissionError("Access denied: path traversal detected")
 
 
-def _resolve_and_validate_user_data_path(path: str, thread_data: ThreadDataState) -> str:
+def _resolve_and_validate_user_data_path(path: str, thread_data: ThreadDataState, app_config: AppConfig) -> str:
     """Resolve a /mnt/user-data virtual path and validate it stays in bounds.
 
     Returns the resolved host path string.
+
+    ``app_config`` is accepted for signature symmetry with the other resolver
+    helpers; the user-data resolution path itself is fully derivable from
+    ``thread_data``.
     """
+    _ = app_config  # noqa: F841 — kept for interface symmetry with sibling resolvers
     resolved_str = replace_virtual_path(path, thread_data)
     resolved = Path(resolved_str).resolve()
     _validate_resolved_user_data_path(resolved, thread_data)
     return str(resolved)
 
 
-def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState | None) -> None:
+def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState | None, app_config: AppConfig) -> None:
     """Validate absolute paths in local-sandbox bash commands.
 
     This validation is only a best-effort guard for the explicit
@@ -653,7 +640,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         raise PermissionError(f"Unsafe file:// URL in command: {file_url_match.group()}. Use paths under {VIRTUAL_PATH_PREFIX}")
 
     unsafe_paths: list[str] = []
-    allowed_paths = _get_mcp_allowed_paths()
+    allowed_paths = _get_mcp_allowed_paths(app_config)
 
     for absolute_path in _ABSOLUTE_PATH_PATTERN.findall(command):
         # Check for MCP filesystem server allowed paths
@@ -666,7 +653,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
             continue
 
         # Allow skills container path (resolved by tools.py before passing to sandbox)
-        if _is_skills_path(absolute_path):
+        if _is_skills_path(absolute_path, app_config):
             _reject_path_traversal(absolute_path)
             continue
 
@@ -676,7 +663,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
             continue
 
         # Allow custom mount container paths
-        if _is_custom_mount_path(absolute_path):
+        if _is_custom_mount_path(absolute_path, app_config):
             _reject_path_traversal(absolute_path)
             continue
 
@@ -690,12 +677,13 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         raise PermissionError(f"Unsafe absolute paths in command: {unsafe}. Use paths under {VIRTUAL_PATH_PREFIX}")
 
 
-def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState | None) -> str:
+def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState | None, app_config: AppConfig) -> str:
     """Replace all virtual paths (/mnt/user-data, /mnt/skills, /mnt/acp-workspace) in a command string.
 
     Args:
         command: The command string that may contain virtual paths.
         thread_data: The thread data containing actual paths.
+        app_config: Resolved application config.
 
     Returns:
         The command with all virtual paths replaced.
@@ -703,13 +691,13 @@ def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState 
     result = command
 
     # Replace skills paths
-    skills_container = _get_skills_container_path()
-    skills_host = _get_skills_host_path()
+    skills_container = _get_skills_container_path(app_config)
+    skills_host = _get_skills_host_path(app_config)
     if skills_host and skills_container in result:
         skills_pattern = re.compile(rf"{re.escape(skills_container)}(/[^\s\"';&|<>()]*)?")
 
         def replace_skills_match(match: re.Match) -> str:
-            return _resolve_skills_path(match.group(0))
+            return _resolve_skills_path(match.group(0), app_config)
 
         result = skills_pattern.sub(replace_skills_match, result)
 
@@ -799,7 +787,7 @@ def sandbox_from_runtime(runtime: ToolRuntime[ContextT, ThreadState] | None = No
     sandbox_id = sandbox_state.get("sandbox_id")
     if sandbox_id is None:
         raise SandboxRuntimeError("Sandbox ID not found in state")
-    sandbox = get_sandbox_provider().get(sandbox_id)
+    sandbox = get_sandbox_provider(resolve_context(runtime).app_config).get(sandbox_id)
     if sandbox is None:
         raise SandboxNotFoundError(f"Sandbox with ID '{sandbox_id}' not found", sandbox_id=sandbox_id)
 
@@ -830,12 +818,14 @@ def ensure_sandbox_initialized(runtime: ToolRuntime[ContextT, ThreadState] | Non
     if runtime.state is None:
         raise SandboxRuntimeError("Tool runtime state not available")
 
+    app_config = runtime.context.app_config
+
     # Check if sandbox already exists in state
     sandbox_state = runtime.state.get("sandbox")
     if sandbox_state is not None:
         sandbox_id = sandbox_state.get("sandbox_id")
         if sandbox_id is not None:
-            sandbox = get_sandbox_provider().get(sandbox_id)
+            sandbox = get_sandbox_provider(app_config).get(sandbox_id)
             if sandbox is not None:
                 return sandbox
             # Sandbox was released, fall through to acquire new one
@@ -845,7 +835,7 @@ def ensure_sandbox_initialized(runtime: ToolRuntime[ContextT, ThreadState] | Non
     if not thread_id:
         raise SandboxRuntimeError("Thread ID not available in runtime context")
 
-    provider = get_sandbox_provider()
+    provider = get_sandbox_provider(app_config)
     sandbox_id = provider.acquire(thread_id)
 
     # Update runtime state - this persists across tool calls
@@ -985,9 +975,9 @@ def bash_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, com
         description: Explain why you are running this command in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         command: The bash command to execute. Always use absolute paths for files and directories.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
-        app_config = resolve_context(runtime).app_config
         sandbox_cfg = app_config.sandbox
         max_chars = sandbox_cfg.bash_output_max_chars if sandbox_cfg else 20000
         if is_local_sandbox(runtime):
@@ -995,11 +985,11 @@ def bash_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, com
                 return f"Error: {LOCAL_HOST_BASH_DISABLED_MESSAGE}"
             ensure_thread_directories_exist(runtime)
             thread_data = get_thread_data(runtime)
-            validate_local_bash_command_paths(command, thread_data)
-            command = replace_virtual_paths_in_command(command, thread_data)
+            validate_local_bash_command_paths(command, thread_data, app_config)
+            command = replace_virtual_paths_in_command(command, thread_data, app_config)
             command = _apply_cwd_prefix(command, thread_data)
             output = sandbox.execute_command(command)
-            return _truncate_bash_output(mask_local_paths_in_output(output, thread_data), max_chars)
+            return _truncate_bash_output(mask_local_paths_in_output(output, thread_data, app_config), max_chars)
         ensure_thread_directories_exist(runtime)
         return _truncate_bash_output(sandbox.execute_command(command), max_chars)
     except SandboxError as e:
@@ -1007,7 +997,7 @@ def bash_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, com
     except PermissionError as e:
         return f"Error: {e}"
     except Exception as e:
-        return f"Error: Unexpected error executing command: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error executing command: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("ls", parse_docstring=True)
@@ -1018,25 +1008,26 @@ def ls_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, path:
         description: Explain why you are listing this directory in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         path: The **absolute** path to the directory to list.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
-            validate_local_tool_path(path, thread_data, read_only=True)
-            if _is_skills_path(path):
-                path = _resolve_skills_path(path)
+            validate_local_tool_path(path, thread_data, app_config, read_only=True)
+            if _is_skills_path(path, app_config):
+                path = _resolve_skills_path(path, app_config)
             elif _is_acp_workspace_path(path):
                 path = _resolve_acp_workspace_path(path, _extract_thread_id_from_thread_data(thread_data))
-            elif not _is_custom_mount_path(path):
-                path = _resolve_and_validate_user_data_path(path, thread_data)
+            elif not _is_custom_mount_path(path, app_config):
+                path = _resolve_and_validate_user_data_path(path, thread_data, app_config)
             # Custom mount paths are resolved by LocalSandbox._resolve_path()
         children = sandbox.list_dir(path)
         if not children:
             return "(empty)"
         output = "\n".join(children)
-        sandbox_cfg = resolve_context(runtime).app_config.sandbox
+        sandbox_cfg = app_config.sandbox
         max_chars = sandbox_cfg.ls_output_max_chars if sandbox_cfg else 20000
         return _truncate_ls_output(output, max_chars)
     except SandboxError as e:
@@ -1046,7 +1037,7 @@ def ls_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, path:
     except PermissionError:
         return f"Error: Permission denied: {requested_path}"
     except Exception as e:
-        return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("glob", parse_docstring=True)
@@ -1067,11 +1058,13 @@ def glob_tool(
         include_dirs: Whether matching directories should also be returned. Default is False.
         max_results: Maximum number of paths to return. Default is 200.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         effective_max_results = _resolve_max_results(
+            app_config,
             "glob",
             max_results,
             default=_DEFAULT_GLOB_MAX_RESULTS,
@@ -1082,10 +1075,10 @@ def glob_tool(
             thread_data = get_thread_data(runtime)
             if thread_data is None:
                 raise SandboxRuntimeError("Thread data not available for local sandbox")
-            path = _resolve_local_read_path(path, thread_data)
+            path = _resolve_local_read_path(path, thread_data, app_config)
         matches, truncated = sandbox.glob(path, pattern, include_dirs=include_dirs, max_results=effective_max_results)
         if thread_data is not None:
-            matches = [mask_local_paths_in_output(match, thread_data) for match in matches]
+            matches = [mask_local_paths_in_output(match, thread_data, app_config) for match in matches]
         return _format_glob_results(requested_path, matches, truncated)
     except SandboxError as e:
         return f"Error: {e}"
@@ -1096,7 +1089,7 @@ def glob_tool(
     except PermissionError:
         return f"Error: Permission denied: {requested_path}"
     except Exception as e:
-        return f"Error: Unexpected error searching paths: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error searching paths: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("grep", parse_docstring=True)
@@ -1121,11 +1114,13 @@ def grep_tool(
         case_sensitive: Whether matching is case-sensitive. Default is False.
         max_results: Maximum number of matching lines to return. Default is 100.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         effective_max_results = _resolve_max_results(
+            app_config,
             "grep",
             max_results,
             default=_DEFAULT_GREP_MAX_RESULTS,
@@ -1136,7 +1131,7 @@ def grep_tool(
             thread_data = get_thread_data(runtime)
             if thread_data is None:
                 raise SandboxRuntimeError("Thread data not available for local sandbox")
-            path = _resolve_local_read_path(path, thread_data)
+            path = _resolve_local_read_path(path, thread_data, app_config)
         matches, truncated = sandbox.grep(
             path,
             pattern,
@@ -1148,7 +1143,7 @@ def grep_tool(
         if thread_data is not None:
             matches = [
                 GrepMatch(
-                    path=mask_local_paths_in_output(match.path, thread_data),
+                    path=mask_local_paths_in_output(match.path, thread_data, app_config),
                     line_number=match.line_number,
                     line=match.line,
                 )
@@ -1166,7 +1161,7 @@ def grep_tool(
     except PermissionError:
         return f"Error: Permission denied: {requested_path}"
     except Exception as e:
-        return f"Error: Unexpected error searching file contents: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error searching file contents: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("read_file", parse_docstring=True)
@@ -1185,26 +1180,27 @@ def read_file_tool(
         start_line: Optional starting line number (1-indexed, inclusive). Use with end_line to read a specific range.
         end_line: Optional ending line number (1-indexed, inclusive). Use with start_line to read a specific range.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
-            validate_local_tool_path(path, thread_data, read_only=True)
-            if _is_skills_path(path):
-                path = _resolve_skills_path(path)
+            validate_local_tool_path(path, thread_data, app_config, read_only=True)
+            if _is_skills_path(path, app_config):
+                path = _resolve_skills_path(path, app_config)
             elif _is_acp_workspace_path(path):
                 path = _resolve_acp_workspace_path(path, _extract_thread_id_from_thread_data(thread_data))
-            elif not _is_custom_mount_path(path):
-                path = _resolve_and_validate_user_data_path(path, thread_data)
+            elif not _is_custom_mount_path(path, app_config):
+                path = _resolve_and_validate_user_data_path(path, thread_data, app_config)
             # Custom mount paths are resolved by LocalSandbox._resolve_path()
         content = sandbox.read_file(path)
         if not content:
             return "(empty)"
         if start_line is not None and end_line is not None:
             content = "\n".join(content.splitlines()[start_line - 1 : end_line])
-        sandbox_cfg = resolve_context(runtime).app_config.sandbox
+        sandbox_cfg = app_config.sandbox
         max_chars = sandbox_cfg.read_file_output_max_chars if sandbox_cfg else 50000
         return _truncate_read_file_output(content, max_chars)
     except SandboxError as e:
@@ -1216,7 +1212,7 @@ def read_file_tool(
     except IsADirectoryError:
         return f"Error: Path is a directory, not a file: {requested_path}"
     except Exception as e:
-        return f"Error: Unexpected error reading file: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error reading file: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("write_file", parse_docstring=True)
@@ -1234,15 +1230,16 @@ def write_file_tool(
         path: The **absolute** path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND.
         content: The content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
-            validate_local_tool_path(path, thread_data)
-            if not _is_custom_mount_path(path):
-                path = _resolve_and_validate_user_data_path(path, thread_data)
+            validate_local_tool_path(path, thread_data, app_config)
+            if not _is_custom_mount_path(path, app_config):
+                path = _resolve_and_validate_user_data_path(path, thread_data, app_config)
             # Custom mount paths are resolved by LocalSandbox._resolve_path()
         with get_file_operation_lock(sandbox, path):
             sandbox.write_file(path, content, append)
@@ -1254,9 +1251,9 @@ def write_file_tool(
     except IsADirectoryError:
         return f"Error: Path is a directory, not a file: {requested_path}"
     except OSError as e:
-        return f"Error: Failed to write file '{requested_path}': {_sanitize_error(e, runtime)}"
+        return f"Error: Failed to write file '{requested_path}': {_sanitize_error(e, runtime, app_config)}"
     except Exception as e:
-        return f"Error: Unexpected error writing file: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error writing file: {_sanitize_error(e, runtime, app_config)}"
 
 
 @tool("str_replace", parse_docstring=True)
@@ -1278,15 +1275,16 @@ def str_replace_tool(
         new_str: The new substring. ALWAYS PROVIDE THIS PARAMETER FOURTH.
         replace_all: Whether to replace all occurrences of the substring. If False, only the first occurrence will be replaced. Default is False.
     """
+    app_config = resolve_context(runtime).app_config
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
-            validate_local_tool_path(path, thread_data)
-            if not _is_custom_mount_path(path):
-                path = _resolve_and_validate_user_data_path(path, thread_data)
+            validate_local_tool_path(path, thread_data, app_config)
+            if not _is_custom_mount_path(path, app_config):
+                path = _resolve_and_validate_user_data_path(path, thread_data, app_config)
             # Custom mount paths are resolved by LocalSandbox._resolve_path()
         with get_file_operation_lock(sandbox, path):
             content = sandbox.read_file(path)
@@ -1307,4 +1305,4 @@ def str_replace_tool(
     except PermissionError:
         return f"Error: Permission denied accessing file: {requested_path}"
     except Exception as e:
-        return f"Error: Unexpected error replacing string: {_sanitize_error(e, runtime)}"
+        return f"Error: Unexpected error replacing string: {_sanitize_error(e, runtime, app_config)}"

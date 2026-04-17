@@ -34,24 +34,18 @@ def create_chat_model(
     name: str | None = None,
     thinking_enabled: bool = False,
     *,
-    app_config: "AppConfig | None" = None,
+    app_config: "AppConfig",
     **kwargs,
 ) -> BaseChatModel:
     """Create a chat model instance from the config.
 
     Args:
         name: The name of the model to create. If None, the first model in the config will be used.
-        app_config: Application config. Falls back to AppConfig.current() when
-            omitted; new callers should pass this explicitly.
+        app_config: Application config — required.
 
     Returns:
         A chat model instance.
     """
-    if app_config is None:
-        # TODO(P2-10): fold into a required parameter once all callers
-        # (memory updater, summarization middleware's implicit model) thread
-        # config explicitly.
-        app_config = AppConfig.current()
     config = app_config
     if name is None:
         name = config.models[0].name

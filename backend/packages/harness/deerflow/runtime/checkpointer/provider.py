@@ -99,10 +99,13 @@ _checkpointer: Checkpointer | None = None
 _checkpointer_ctx = None  # open context manager keeping the connection alive
 
 
-def get_checkpointer() -> Checkpointer:
+def get_checkpointer(app_config: AppConfig) -> Checkpointer:
     """Return the global sync checkpointer singleton, creating it on first call.
 
-    Returns an ``InMemorySaver`` when no checkpointer is configured in *config.yaml*.
+    Returns an ``InMemorySaver`` only when ``checkpointer`` is explicitly
+    absent from config.yaml. Any other failure (missing config, invalid
+    backend, connection error) propagates — silent degradation to in-memory
+    would drop persistent-run state on process restart.
 
     Raises:
         ImportError: If the required package for the configured backend is not installed.
@@ -113,10 +116,7 @@ def get_checkpointer() -> Checkpointer:
     if _checkpointer is not None:
         return _checkpointer
 
-    try:
-        config = AppConfig.current().checkpointer
-    except (LookupError, FileNotFoundError):
-        config = None
+    config = app_config.checkpointer
     if config is None:
         from langgraph.checkpoint.memory import InMemorySaver
 
@@ -152,25 +152,23 @@ def reset_checkpointer() -> None:
 
 
 @contextlib.contextmanager
-def checkpointer_context() -> Iterator[Checkpointer]:
+def checkpointer_context(app_config: AppConfig) -> Iterator[Checkpointer]:
     """Sync context manager that yields a checkpointer and cleans up on exit.
 
     Unlike :func:`get_checkpointer`, this does **not** cache the instance —
     each ``with`` block creates and destroys its own connection.  Use it in
     CLI scripts or tests where you want deterministic cleanup::
 
-        with checkpointer_context() as cp:
+        with checkpointer_context(app_config) as cp:
             graph.invoke(input, config={"configurable": {"thread_id": "1"}})
 
     Yields an ``InMemorySaver`` when no checkpointer is configured in *config.yaml*.
     """
-
-    config = AppConfig.current()
-    if config.checkpointer is None:
+    if app_config.checkpointer is None:
         from langgraph.checkpoint.memory import InMemorySaver
 
         yield InMemorySaver()
         return
 
-    with _sync_checkpointer_cm(config.checkpointer) as saver:
+    with _sync_checkpointer_cm(app_config.checkpointer) as saver:
         yield saver

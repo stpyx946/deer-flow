@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+_TEST_APP_CONFIG = MagicMock(name="TestAppConfig")
+
 # Module names that need to be mocked to break circular imports
 _MOCKED_MODULE_NAMES = [
     "deerflow.agents",
@@ -203,7 +205,7 @@ class TestAsyncExecutionPath:
             config=base_config,
             tools=[],
             thread_id="test-thread",
-            trace_id="test-trace",
+            trace_id="test-trace", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -232,7 +234,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -259,7 +261,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -285,7 +287,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -306,7 +308,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -327,7 +329,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -348,7 +350,7 @@ class TestAsyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -384,7 +386,7 @@ class TestSyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -419,7 +421,7 @@ class TestSyncExecutionPath:
             executor = SubagentExecutor(
                 config=base_config,
                 tools=[],
-                thread_id="test-thread",
+                thread_id="test-thread", app_config=_TEST_APP_CONFIG,
             )
 
             with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -456,7 +458,7 @@ class TestSyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -477,7 +479,7 @@ class TestSyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_aexecute") as mock_aexecute:
@@ -511,7 +513,7 @@ class TestSyncExecutionPath:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -565,7 +567,7 @@ class TestAsyncToolSupport:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -602,7 +604,7 @@ class TestAsyncToolSupport:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -648,7 +650,7 @@ class TestThreadSafety:
             executor = SubagentExecutor(
                 config=base_config,
                 tools=[],
-                thread_id=f"thread-{task_id}",
+                thread_id=f"thread-{task_id}", app_config=_TEST_APP_CONFIG,
             )
 
             with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -858,7 +860,7 @@ class TestCooperativeCancellation:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -898,7 +900,7 @@ class TestCooperativeCancellation:
         executor = SubagentExecutor(
             config=base_config,
             tools=[],
-            thread_id="test-thread",
+            thread_id="test-thread", app_config=_TEST_APP_CONFIG,
         )
 
         with patch.object(executor, "_create_agent", return_value=mock_agent):
@@ -977,7 +979,7 @@ class TestCooperativeCancellation:
             config=short_config,
             tools=[],
             thread_id="test-thread",
-            trace_id="test-trace",
+            trace_id="test-trace", app_config=_TEST_APP_CONFIG,
         )
 
         # Wrap _scheduler_pool.submit so we know when run_task finishes

@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from deerflow.agents.thread_state import SandboxState, ThreadDataState, ThreadState
+from deerflow.config.app_config import AppConfig
 from deerflow.models import create_chat_model
 from deerflow.subagents.config import SubagentConfig
 
@@ -132,24 +133,16 @@ class SubagentExecutor:
         self,
         config: SubagentConfig,
         tools: list[BaseTool],
+        app_config: AppConfig,
         parent_model: str | None = None,
         sandbox_state: SandboxState | None = None,
         thread_data: ThreadDataState | None = None,
         thread_id: str | None = None,
         trace_id: str | None = None,
     ):
-        """Initialize the executor.
-
-        Args:
-            config: Subagent configuration.
-            tools: List of all available tools (will be filtered).
-            parent_model: The parent agent's model name for inheritance.
-            sandbox_state: Sandbox state from parent agent.
-            thread_data: Thread data from parent agent.
-            thread_id: Thread ID for sandbox operations.
-            trace_id: Trace ID from parent for distributed tracing.
-        """
+        """Initialize the executor."""
         self.config = config
+        self.app_config = app_config
         self.parent_model = parent_model
         self.sandbox_state = sandbox_state
         self.thread_data = thread_data
@@ -169,7 +162,7 @@ class SubagentExecutor:
     def _create_agent(self):
         """Create the agent instance."""
         model_name = _get_model_name(self.config, self.parent_model)
-        model = create_chat_model(name=model_name, thinking_enabled=False)
+        model = create_chat_model(name=model_name, thinking_enabled=False, app_config=self.app_config)
 
         from deerflow.agents.middlewares.tool_error_handling_middleware import build_subagent_runtime_middlewares
 

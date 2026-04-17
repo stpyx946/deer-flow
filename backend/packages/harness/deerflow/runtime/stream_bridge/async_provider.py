@@ -25,14 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 @contextlib.asynccontextmanager
-async def make_stream_bridge(config=None) -> AsyncIterator[StreamBridge]:
+async def make_stream_bridge(app_config: AppConfig) -> AsyncIterator[StreamBridge]:
     """Async context manager that yields a :class:`StreamBridge`.
 
-    Falls back to :class:`MemoryStreamBridge` when no configuration is
-    provided and nothing is set globally.
+    Falls back to :class:`MemoryStreamBridge` when no ``stream_bridge``
+    section is configured.
     """
-    if config is None:
-        config = AppConfig.current().stream_bridge
+    config = app_config.stream_bridge
 
     if config is None or config.type == "memory":
         from deerflow.runtime.stream_bridge.memory import MemoryStreamBridge

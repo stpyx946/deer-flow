@@ -8,22 +8,19 @@ from deerflow.config.app_config import AppConfig
 from deerflow.skills.types import Skill
 
 
-def test_build_custom_mounts_section_returns_empty_when_no_mounts(monkeypatch):
+def test_build_custom_mounts_section_returns_empty_when_no_mounts():
     config = SimpleNamespace(sandbox=SimpleNamespace(mounts=[]))
-    monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
-
-    assert prompt_module._build_custom_mounts_section() == ""
+    assert prompt_module._build_custom_mounts_section(config) == ""
 
 
-def test_build_custom_mounts_section_lists_configured_mounts(monkeypatch):
+def test_build_custom_mounts_section_lists_configured_mounts():
     mounts = [
         SimpleNamespace(container_path="/home/user/shared", read_only=False),
         SimpleNamespace(container_path="/mnt/reference", read_only=True),
     ]
     config = SimpleNamespace(sandbox=SimpleNamespace(mounts=mounts))
-    monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
 
-    section = prompt_module._build_custom_mounts_section()
+    section = prompt_module._build_custom_mounts_section(config)
 
     assert "**Custom Mounted Directories:**" in section
     assert "`/home/user/shared`" in section
@@ -37,15 +34,15 @@ def test_apply_prompt_template_includes_custom_mounts(monkeypatch):
     config = SimpleNamespace(
         sandbox=SimpleNamespace(mounts=mounts),
         skills=SimpleNamespace(container_path="/mnt/skills"),
+        skill_evolution=SimpleNamespace(enabled=False),
     )
-    monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
-    monkeypatch.setattr(prompt_module, "_get_enabled_skills", lambda: [])
-    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda: "")
-    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda: "")
-    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
+    monkeypatch.setattr(prompt_module, "_get_enabled_skills", lambda *a, **k: [])
+    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda app_config: "")
+    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda app_config: "")
+    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda app_config, agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda agent_name=None: "")
 
-    prompt = prompt_module.apply_prompt_template()
+    prompt = prompt_module.apply_prompt_template(config)
 
     assert "`/home/user/shared`" in prompt
     assert "Custom Mounted Directories" in prompt
@@ -55,15 +52,15 @@ def test_apply_prompt_template_includes_relative_path_guidance(monkeypatch):
     config = SimpleNamespace(
         sandbox=SimpleNamespace(mounts=[]),
         skills=SimpleNamespace(container_path="/mnt/skills"),
+        skill_evolution=SimpleNamespace(enabled=False),
     )
-    monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
-    monkeypatch.setattr(prompt_module, "_get_enabled_skills", lambda: [])
-    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda: "")
-    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda: "")
-    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None: "")
+    monkeypatch.setattr(prompt_module, "_get_enabled_skills", lambda *a, **k: [])
+    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda app_config: "")
+    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda app_config: "")
+    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda app_config, agent_name=None: "")
     monkeypatch.setattr(prompt_module, "get_agent_soul", lambda agent_name=None: "")
 
-    prompt = prompt_module.apply_prompt_template()
+    prompt = prompt_module.apply_prompt_template(config)
 
     assert "Treat `/mnt/user-data/workspace` as your default current working directory" in prompt
     assert "`hello.txt`, `../uploads/data.csv`, and `../outputs/report.md`" in prompt
@@ -84,7 +81,7 @@ def test_refresh_skills_system_prompt_cache_async_reloads_immediately(monkeypatc
         )
 
     state = {"skills": [make_skill("first-skill")]}
-    monkeypatch.setattr(prompt_module, "load_skills", lambda enabled_only=True: list(state["skills"]))
+    monkeypatch.setattr(prompt_module, "load_skills", lambda *a, **kwargs: list(state["skills"]))
     prompt_module._reset_skills_system_prompt_cache_state()
 
     try:
@@ -120,7 +117,7 @@ def test_clear_cache_does_not_spawn_parallel_refresh_workers(monkeypatch, tmp_pa
             enabled=True,
         )
 
-    def fake_load_skills(enabled_only=True):
+    def fake_load_skills(*a, **kwargs):
         nonlocal active_loads, max_active_loads, call_count
         with lock:
             active_loads += 1
@@ -157,7 +154,7 @@ def test_clear_cache_does_not_spawn_parallel_refresh_workers(monkeypatch, tmp_pa
 
 def test_warm_enabled_skills_cache_logs_on_timeout(monkeypatch, caplog):
     event = threading.Event()
-    monkeypatch.setattr(prompt_module, "_ensure_enabled_skills_cache", lambda: event)
+    monkeypatch.setattr(prompt_module, "_ensure_enabled_skills_cache", lambda *a, **k: event)
 
     with caplog.at_level("WARNING"):
         warmed = prompt_module.warm_enabled_skills_cache(timeout_seconds=0.01)

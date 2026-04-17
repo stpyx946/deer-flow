@@ -169,8 +169,10 @@ async def run_agent(
         # Construct typed context for the agent run.
         # LangGraph's astream(context=...) injects this into Runtime.context
         # so middleware/tools can access it via resolve_context().
+        if ctx.app_config is None:
+            raise RuntimeError("RunContext.app_config is required — Gateway must populate it via get_run_context")
         deer_flow_context = DeerFlowContext(
-            app_config=ctx.app_config if ctx.app_config is not None else AppConfig.current(),
+            app_config=ctx.app_config,
             thread_id=thread_id,
         )
 

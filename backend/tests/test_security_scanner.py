@@ -12,7 +12,7 @@ async def test_scan_skill_content_blocks_when_model_unavailable(monkeypatch):
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
     monkeypatch.setattr("deerflow.skills.security_scanner.create_chat_model", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    result = await scan_skill_content("---\nname: demo-skill\ndescription: demo\n---\n", executable=False)
+    result = await scan_skill_content(config, "---\nname: demo-skill\ndescription: demo\n---\n", executable=False)
 
     assert result.decision == "block"
     assert "manual review required" in result.reason

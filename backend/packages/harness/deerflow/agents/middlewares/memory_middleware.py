@@ -236,7 +236,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryMiddlewareState]):
         # threading.Timer fires on a different thread where ContextVar values are not
         # propagated, so we must store user_id explicitly in ConversationContext.
         user_id = get_effective_user_id()
-        queue = get_memory_queue()
+        queue = get_memory_queue(runtime.context.app_config)
         queue.add(
             thread_id=thread_id,
             messages=filtered_messages,

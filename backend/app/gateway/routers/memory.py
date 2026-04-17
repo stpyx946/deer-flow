@@ -115,7 +115,7 @@ class MemoryStatusResponse(BaseModel):
     summary="Get Memory Data",
     description="Retrieve the current global memory data including user context, history, and facts.",
 )
-async def get_memory() -> MemoryResponse:
+async def get_memory(app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Get the current global memory data.
 
     Returns:
@@ -149,7 +149,7 @@ async def get_memory() -> MemoryResponse:
         }
         ```
     """
-    memory_data = get_memory_data(user_id=get_effective_user_id())
+    memory_data = get_memory_data(app_config.memory, user_id=get_effective_user_id())
     return MemoryResponse(**memory_data)
 
 
@@ -160,7 +160,7 @@ async def get_memory() -> MemoryResponse:
     summary="Reload Memory Data",
     description="Reload memory data from the storage file, refreshing the in-memory cache.",
 )
-async def reload_memory() -> MemoryResponse:
+async def reload_memory(app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Reload memory data from file.
 
     This forces a reload of the memory data from the storage file,
@@ -169,7 +169,7 @@ async def reload_memory() -> MemoryResponse:
     Returns:
         The reloaded memory data.
     """
-    memory_data = reload_memory_data(user_id=get_effective_user_id())
+    memory_data = reload_memory_data(app_config.memory, user_id=get_effective_user_id())
     return MemoryResponse(**memory_data)
 
 
@@ -180,10 +180,10 @@ async def reload_memory() -> MemoryResponse:
     summary="Clear All Memory Data",
     description="Delete all saved memory data and reset the memory structure to an empty state.",
 )
-async def clear_memory() -> MemoryResponse:
+async def clear_memory(app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Clear all persisted memory data."""
     try:
-        memory_data = clear_memory_data(user_id=get_effective_user_id())
+        memory_data = clear_memory_data(app_config.memory, user_id=get_effective_user_id())
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Failed to clear memory data.") from exc
 
@@ -197,10 +197,11 @@ async def clear_memory() -> MemoryResponse:
     summary="Create Memory Fact",
     description="Create a single saved memory fact manually.",
 )
-async def create_memory_fact_endpoint(request: FactCreateRequest) -> MemoryResponse:
+async def create_memory_fact_endpoint(request: FactCreateRequest, app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Create a single fact manually."""
     try:
         memory_data = create_memory_fact(
+            app_config.memory,
             content=request.content,
             category=request.category,
             confidence=request.confidence,
@@ -221,10 +222,10 @@ async def create_memory_fact_endpoint(request: FactCreateRequest) -> MemoryRespo
     summary="Delete Memory Fact",
     description="Delete a single saved memory fact by its fact id.",
 )
-async def delete_memory_fact_endpoint(fact_id: str) -> MemoryResponse:
+async def delete_memory_fact_endpoint(fact_id: str, app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Delete a single fact from memory by fact id."""
     try:
-        memory_data = delete_memory_fact(fact_id, user_id=get_effective_user_id())
+        memory_data = delete_memory_fact(app_config.memory, fact_id, user_id=get_effective_user_id())
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Memory fact '{fact_id}' not found.") from exc
     except OSError as exc:
@@ -240,10 +241,11 @@ async def delete_memory_fact_endpoint(fact_id: str) -> MemoryResponse:
     summary="Patch Memory Fact",
     description="Partially update a single saved memory fact by its fact id while preserving omitted fields.",
 )
-async def update_memory_fact_endpoint(fact_id: str, request: FactPatchRequest) -> MemoryResponse:
+async def update_memory_fact_endpoint(fact_id: str, request: FactPatchRequest, app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Partially update a single fact manually."""
     try:
         memory_data = update_memory_fact(
+            app_config.memory,
             fact_id=fact_id,
             content=request.content,
             category=request.category,
@@ -267,9 +269,9 @@ async def update_memory_fact_endpoint(fact_id: str, request: FactPatchRequest) -
     summary="Export Memory Data",
     description="Export the current global memory data as JSON for backup or transfer.",
 )
-async def export_memory() -> MemoryResponse:
+async def export_memory(app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Export the current memory data."""
-    memory_data = get_memory_data(user_id=get_effective_user_id())
+    memory_data = get_memory_data(app_config.memory, user_id=get_effective_user_id())
     return MemoryResponse(**memory_data)
 
 
@@ -280,10 +282,10 @@ async def export_memory() -> MemoryResponse:
     summary="Import Memory Data",
     description="Import and overwrite the current global memory data from a JSON payload.",
 )
-async def import_memory(request: MemoryResponse) -> MemoryResponse:
+async def import_memory(request: MemoryResponse, app_config: AppConfig = Depends(get_config)) -> MemoryResponse:
     """Import and persist memory data."""
     try:
-        memory_data = import_memory_data(request.model_dump(), user_id=get_effective_user_id())
+        memory_data = import_memory_data(app_config.memory, request.model_dump(), user_id=get_effective_user_id())
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Failed to import memory data.") from exc
 
@@ -345,7 +347,7 @@ async def get_memory_status(
         Combined memory configuration and current data.
     """
     config = app_config.memory
-    memory_data = get_memory_data(user_id=get_effective_user_id())
+    memory_data = get_memory_data(config, user_id=get_effective_user_id())
 
     return MemoryStatusResponse(
         config=MemoryConfigResponse(

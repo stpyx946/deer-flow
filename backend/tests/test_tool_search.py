@@ -270,27 +270,27 @@ class TestDeferredToolsPromptSection:
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
 
         # tool_search.enabled defaults to False
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(AppConfig.current())
         assert section == ""
 
     def test_empty_when_enabled_but_no_registry(self, monkeypatch):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
         AppConfig.current().tool_search = ToolSearchConfig(enabled=True)
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(AppConfig.current())
         assert section == ""
 
     def test_empty_when_enabled_but_empty_registry(self, monkeypatch):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
         AppConfig.current().tool_search = ToolSearchConfig(enabled=True)
         set_deferred_registry(DeferredToolRegistry())
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(AppConfig.current())
         assert section == ""
 
     def test_lists_tool_names(self, registry, monkeypatch):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
         AppConfig.current().tool_search = ToolSearchConfig(enabled=True)
         set_deferred_registry(registry)
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(AppConfig.current())
         assert "<available-deferred-tools>" in section
         assert "</available-deferred-tools>" in section
         assert "github_create_issue" in section

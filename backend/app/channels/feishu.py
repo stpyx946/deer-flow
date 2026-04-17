@@ -375,7 +375,9 @@ class FeishuChannel(Channel):
         virtual_path = f"{VIRTUAL_PATH_PREFIX}/uploads/{resolved_target.name}"
 
         try:
-            sandbox_provider = get_sandbox_provider()
+            from deerflow.config.app_config import AppConfig
+
+            sandbox_provider = get_sandbox_provider(AppConfig.from_file())
             sandbox_id = sandbox_provider.acquire(thread_id)
             if sandbox_id != "local":
                 sandbox = sandbox_provider.get(sandbox_id)

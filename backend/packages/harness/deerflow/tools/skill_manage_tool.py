@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
 
 from langchain.tools import ToolRuntime, tool
@@ -13,6 +13,9 @@ from langgraph.typing import ContextT
 
 from deerflow.agents.lead_agent.prompt import refresh_skills_system_prompt_cache_async
 from deerflow.agents.thread_state import ThreadState
+
+if TYPE_CHECKING:
+    from deerflow.config.app_config import AppConfig
 from deerflow.mcp.tools import _make_sync_tool_wrapper
 from deerflow.skills.manager import (
     append_history,
@@ -60,8 +63,8 @@ def _history_record(*, action: str, file_path: str, prev_content: str | None, ne
     }
 
 
-async def _scan_or_raise(content: str, *, executable: bool, location: str) -> dict[str, str]:
-    result = await scan_skill_content(content, executable=executable, location=location)
+async def _scan_or_raise(app_config: "AppConfig", content: str, *, executable: bool, location: str) -> dict[str, str]:
+    result = await scan_skill_content(app_config, content, executable=executable, location=location)
     if result.decision == "block":
         raise ValueError(f"Security scan blocked the write: {result.reason}")
     if executable and result.decision != "allow":
@@ -94,50 +97,55 @@ async def _skill_manage_impl(
         replace: Replacement text for patch.
         expected_count: Optional expected number of replacements for patch.
     """
+    from deerflow.config.deer_flow_context import resolve_context
+
     name = validate_skill_name(name)
     lock = _get_lock(name)
     thread_id = _get_thread_id(runtime)
+    app_config = resolve_context(runtime).app_config
 
     async with lock:
         if action == "create":
-            if await _to_thread(custom_skill_exists, name):
+            if await _to_thread(custom_skill_exists, name, app_config):
                 raise ValueError(f"Custom skill '{name}' already exists.")
             if content is None:
                 raise ValueError("content is required for create.")
             await _to_thread(validate_skill_markdown_content, name, content)
-            scan = await _scan_or_raise(content, executable=False, location=f"{name}/SKILL.md")
-            skill_file = await _to_thread(get_custom_skill_file, name)
+            scan = await _scan_or_raise(app_config, content, executable=False, location=f"{name}/SKILL.md")
+            skill_file = await _to_thread(get_custom_skill_file, name, app_config)
             await _to_thread(atomic_write, skill_file, content)
             await _to_thread(
                 append_history,
                 name,
                 _history_record(action="create", file_path="SKILL.md", prev_content=None, new_content=content, thread_id=thread_id, scanner=scan),
+                app_config,
             )
-            await refresh_skills_system_prompt_cache_async()
+            await refresh_skills_system_prompt_cache_async(app_config)
             return f"Created custom skill '{name}'."
 
         if action == "edit":
-            await _to_thread(ensure_custom_skill_is_editable, name)
+            await _to_thread(ensure_custom_skill_is_editable, name, app_config)
             if content is None:
                 raise ValueError("content is required for edit.")
             await _to_thread(validate_skill_markdown_content, name, content)
-            scan = await _scan_or_raise(content, executable=False, location=f"{name}/SKILL.md")
-            skill_file = await _to_thread(get_custom_skill_file, name)
+            scan = await _scan_or_raise(app_config, content, executable=False, location=f"{name}/SKILL.md")
+            skill_file = await _to_thread(get_custom_skill_file, name, app_config)
             prev_content = await _to_thread(skill_file.read_text, encoding="utf-8")
             await _to_thread(atomic_write, skill_file, content)
             await _to_thread(
                 append_history,
                 name,
                 _history_record(action="edit", file_path="SKILL.md", prev_content=prev_content, new_content=content, thread_id=thread_id, scanner=scan),
+                app_config,
             )
-            await refresh_skills_system_prompt_cache_async()
+            await refresh_skills_system_prompt_cache_async(app_config)
             return f"Updated custom skill '{name}'."
 
         if action == "patch":
-            await _to_thread(ensure_custom_skill_is_editable, name)
+            await _to_thread(ensure_custom_skill_is_editable, name, app_config)
             if find is None or replace is None:
                 raise ValueError("find and replace are required for patch.")
-            skill_file = await _to_thread(get_custom_skill_file, name)
+            skill_file = await _to_thread(get_custom_skill_file, name, app_config)
             prev_content = await _to_thread(skill_file.read_text, encoding="utf-8")
             occurrences = prev_content.count(find)
             if occurrences == 0:
@@ -147,51 +155,54 @@ async def _skill_manage_impl(
             replacement_count = expected_count if expected_count is not None else 1
             new_content = prev_content.replace(find, replace, replacement_count)
             await _to_thread(validate_skill_markdown_content, name, new_content)
-            scan = await _scan_or_raise(new_content, executable=False, location=f"{name}/SKILL.md")
+            scan = await _scan_or_raise(app_config, new_content, executable=False, location=f"{name}/SKILL.md")
             await _to_thread(atomic_write, skill_file, new_content)
             await _to_thread(
                 append_history,
                 name,
                 _history_record(action="patch", file_path="SKILL.md", prev_content=prev_content, new_content=new_content, thread_id=thread_id, scanner=scan),
+                app_config,
             )
-            await refresh_skills_system_prompt_cache_async()
+            await refresh_skills_system_prompt_cache_async(app_config)
             return f"Patched custom skill '{name}' ({replacement_count} replacement(s) applied, {occurrences} match(es) found)."
 
         if action == "delete":
-            await _to_thread(ensure_custom_skill_is_editable, name)
-            skill_dir = await _to_thread(get_custom_skill_dir, name)
-            prev_content = await _to_thread(read_custom_skill_content, name)
+            await _to_thread(ensure_custom_skill_is_editable, name, app_config)
+            skill_dir = await _to_thread(get_custom_skill_dir, name, app_config)
+            prev_content = await _to_thread(read_custom_skill_content, name, app_config)
             await _to_thread(
                 append_history,
                 name,
                 _history_record(action="delete", file_path="SKILL.md", prev_content=prev_content, new_content=None, thread_id=thread_id, scanner={"decision": "allow", "reason": "Deletion requested."}),
+                app_config,
             )
             await _to_thread(shutil.rmtree, skill_dir)
-            await refresh_skills_system_prompt_cache_async()
+            await refresh_skills_system_prompt_cache_async(app_config)
             return f"Deleted custom skill '{name}'."
 
         if action == "write_file":
-            await _to_thread(ensure_custom_skill_is_editable, name)
+            await _to_thread(ensure_custom_skill_is_editable, name, app_config)
             if path is None or content is None:
                 raise ValueError("path and content are required for write_file.")
-            target = await _to_thread(ensure_safe_support_path, name, path)
+            target = await _to_thread(ensure_safe_support_path, name, path, app_config)
             exists = await _to_thread(target.exists)
             prev_content = await _to_thread(target.read_text, encoding="utf-8") if exists else None
             executable = "scripts/" in path or path.startswith("scripts/")
-            scan = await _scan_or_raise(content, executable=executable, location=f"{name}/{path}")
+            scan = await _scan_or_raise(app_config, content, executable=executable, location=f"{name}/{path}")
             await _to_thread(atomic_write, target, content)
             await _to_thread(
                 append_history,
                 name,
                 _history_record(action="write_file", file_path=path, prev_content=prev_content, new_content=content, thread_id=thread_id, scanner=scan),
+                app_config,
             )
             return f"Wrote '{path}' for custom skill '{name}'."
 
         if action == "remove_file":
-            await _to_thread(ensure_custom_skill_is_editable, name)
+            await _to_thread(ensure_custom_skill_is_editable, name, app_config)
             if path is None:
                 raise ValueError("path is required for remove_file.")
-            target = await _to_thread(ensure_safe_support_path, name, path)
+            target = await _to_thread(ensure_safe_support_path, name, path, app_config)
             if not await _to_thread(target.exists):
                 raise FileNotFoundError(f"Supporting file '{path}' not found for skill '{name}'.")
             prev_content = await _to_thread(target.read_text, encoding="utf-8")
@@ -200,10 +211,11 @@ async def _skill_manage_impl(
                 append_history,
                 name,
                 _history_record(action="remove_file", file_path=path, prev_content=prev_content, new_content=None, thread_id=thread_id, scanner={"decision": "allow", "reason": "Deletion requested."}),
+                app_config,
             )
             return f"Removed '{path}' from custom skill '{name}'."
 
-        if await _to_thread(public_skill_exists, name):
+        if await _to_thread(public_skill_exists, name, app_config):
             raise ValueError(f"'{name}' is a built-in skill. To customise it, create a new skill with the same name under skills/custom/.")
         raise ValueError(f"Unsupported action '{action}'.")
 

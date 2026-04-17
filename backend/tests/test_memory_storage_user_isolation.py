@@ -1,3 +1,15 @@
+
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
 """Tests for per-user memory storage isolation."""
 import pytest
 from pathlib import Path
@@ -21,7 +33,7 @@ def base_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def storage() -> FileMemoryStorage:
-    return FileMemoryStorage()
+    return FileMemoryStorage(_TEST_MEMORY_CONFIG)
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +69,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory = create_empty_memory()
             s.save(memory, user_id="alice")
             expected_path = base_dir / "users" / "alice" / "memory.json"
@@ -68,7 +80,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory_a = create_empty_memory()
             memory_a["user"]["workContext"]["summary"] = "A"
             s.save(memory_a, user_id="alice")
@@ -85,7 +97,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory = create_empty_memory()
             s.save(memory, user_id=None)
             expected_path = base_dir / "memory.json"
@@ -97,7 +109,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
 
             legacy_mem = create_empty_memory()
             legacy_mem["user"]["workContext"]["summary"] = "legacy"
@@ -116,7 +128,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory = create_empty_memory()
             memory["user"]["workContext"]["summary"] = "agent scoped"
             s.save(memory, "test-agent", user_id="alice")
@@ -129,7 +141,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory = create_empty_memory()
             s.save(memory, user_id="alice")
             # After save, cache should have tuple key
@@ -141,7 +153,7 @@ class TestUserIsolatedStorage:
 
         paths = Paths(base_dir)
         with patch("deerflow.agents.memory.storage.get_paths", return_value=paths):
-            s = FileMemoryStorage()
+            s = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             memory = create_empty_memory()
             memory["user"]["workContext"]["summary"] = "initial"
             s.save(memory, user_id="alice")

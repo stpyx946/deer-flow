@@ -71,3 +71,25 @@ def test_config_model_rejects_mutation(model_cls: type[BaseModel]):
 
     with pytest.raises(ValidationError):
         setattr(instance, first_field, "MUTATED")
+
+
+def test_extensions_nested_dict_mutation_is_not_blocked_by_pydantic():
+    """Regression guard: Pydantic `frozen=True` does NOT deep-freeze container fields.
+
+    This test documents the trap — callers MUST compose a new dict and persist
+    it + reload AppConfig instead of reaching into `extensions.skills[x]`.
+    If you need the dict to be truly immutable, wrap with Mapping/frozendict.
+    """
+    from deerflow.config.extensions_config import ExtensionsConfig, SkillStateConfig
+
+    ext = ExtensionsConfig(mcp_servers={}, skills={"a": SkillStateConfig(enabled=True)})
+
+    # This is the pre-refactor anti-pattern: Pydantic lets it through because
+    # the outer model is frozen but the inner dict is a plain builtin. No error.
+    ext.skills["a"] = SkillStateConfig(enabled=False)
+    ext.skills["b"] = SkillStateConfig(enabled=True)
+
+    # The test asserts the leak exists so a future "add deep-freeze" change
+    # flips this expectation and forces call-site review.
+    assert ext.skills["a"].enabled is False
+    assert "b" in ext.skills

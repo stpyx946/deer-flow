@@ -15,6 +15,10 @@ def _make_runtime(tmp_path):
     workspace.mkdir()
     uploads.mkdir()
     outputs.mkdir()
+    from deerflow.config.app_config import AppConfig
+    from deerflow.config.deer_flow_context import DeerFlowContext
+    from deerflow.config.sandbox_config import SandboxConfig
+
     return SimpleNamespace(
         state={
             "sandbox": {"sandbox_id": "local"},
@@ -24,7 +28,10 @@ def _make_runtime(tmp_path):
                 "outputs_path": str(outputs),
             },
         },
-        context={"thread_id": "thread-1"},
+        context=DeerFlowContext(
+            app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+            thread_id="thread-1",
+        ),
     )
 
 

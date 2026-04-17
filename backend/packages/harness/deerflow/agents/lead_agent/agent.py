@@ -61,9 +61,9 @@ def _create_summarization_middleware(app_config: AppConfig) -> SummarizationMidd
     # as middleware rather than lead_agent (SummarizationMiddleware is a
     # LangChain built-in, so we tag the model at creation time).
     if config.model_name:
-        model = create_chat_model(name=config.model_name, thinking_enabled=False)
+        model = create_chat_model(name=config.model_name, thinking_enabled=False, app_config=app_config)
     else:
-        model = create_chat_model(thinking_enabled=False)
+        model = create_chat_model(thinking_enabled=False, app_config=app_config)
     model = model.with_config(tags=["middleware:summarize"])
 
     # Prepare kwargs
@@ -288,22 +288,22 @@ def make_lead_agent(
     Args:
         config: LangGraph ``RunnableConfig`` carrying per-invocation options
             (``thinking_enabled``, ``model_name``, ``is_plan_mode``, etc.).
-        app_config: Resolved application config. When omitted falls back to
-            :meth:`AppConfig.current`, preserving backward compatibility with
-            callers that do not thread config explicitly (LangGraph Server
-            registration path). New callers should pass this parameter.
+        app_config: Resolved application config. Required for in-process
+            entry points (DeerFlowClient, Gateway Worker). When omitted we
+            are being called via ``langgraph.json`` registration and reload
+            from disk — the LangGraph Server bootstrap path has no other
+            way to thread the value.
     """
     # Lazy import to avoid circular dependency
     from deerflow.tools import get_available_tools
     from deerflow.tools.builtins import setup_agent
 
     if app_config is None:
-        # LangGraph Server registers make_lead_agent via langgraph.json; its
-        # invocation path only hands us RunnableConfig. Until that registration
-        # layer owns its own AppConfig, we tolerate the process-global fallback
-        # here. All other entry points (DeerFlowClient, Gateway Worker) pass
-        # app_config explicitly. Remove alongside AppConfig.current() in P2-10.
-        app_config = AppConfig.current()
+        # LangGraph Server registers ``make_lead_agent`` via ``langgraph.json``
+        # and hands us only a ``RunnableConfig``. Reload config from disk
+        # here — it's a pure function, equivalent to the process-global the
+        # old code path would have read.
+        app_config = AppConfig.from_file()
 
     cfg = config.get("configurable", {})
 
@@ -363,7 +363,7 @@ def make_lead_agent(
             model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, app_config=app_config),
             tools=get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled, app_config=app_config) + [setup_agent],
             middleware=_build_middlewares(app_config, config, model_name=model_name),
-            system_prompt=apply_prompt_template(subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, available_skills=set(["bootstrap"])),
+            system_prompt=apply_prompt_template(app_config, subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, available_skills=set(["bootstrap"])),
             state_schema=ThreadState,
             context_schema=DeerFlowContext,
         )
@@ -374,7 +374,7 @@ def make_lead_agent(
         tools=get_available_tools(model_name=model_name, groups=agent_config.tool_groups if agent_config else None, subagent_enabled=subagent_enabled, app_config=app_config),
         middleware=_build_middlewares(app_config, config, model_name=model_name, agent_name=agent_name),
         system_prompt=apply_prompt_template(
-            subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name, available_skills=set(agent_config.skills) if agent_config and agent_config.skills is not None else None
+            app_config, subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name, available_skills=set(agent_config.skills) if agent_config and agent_config.skills is not None else None
         ),
         state_schema=ThreadState,
         context_schema=DeerFlowContext,

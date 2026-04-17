@@ -1,33 +1,35 @@
 import json
 
 from firecrawl import FirecrawlApp
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
 
 from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import resolve_context
 
 
-def _get_firecrawl_client(tool_name: str = "web_search") -> FirecrawlApp:
-    config = AppConfig.current().get_tool_config(tool_name)
+def _get_firecrawl_client(app_config: AppConfig, tool_name: str = "web_search") -> FirecrawlApp:
+    tool_config = app_config.get_tool_config(tool_name)
     api_key = None
-    if config is not None and "api_key" in config.model_extra:
-        api_key = config.model_extra.get("api_key")
+    if tool_config is not None and "api_key" in tool_config.model_extra:
+        api_key = tool_config.model_extra.get("api_key")
     return FirecrawlApp(api_key=api_key)  # type: ignore[arg-type]
 
 
 @tool("web_search", parse_docstring=True)
-def web_search_tool(query: str) -> str:
+def web_search_tool(query: str, runtime: ToolRuntime) -> str:
     """Search the web.
 
     Args:
         query: The query to search for.
     """
     try:
-        config = AppConfig.current().get_tool_config("web_search")
+        app_config = resolve_context(runtime).app_config
+        tool_config = app_config.get_tool_config("web_search")
         max_results = 5
-        if config is not None:
-            max_results = config.model_extra.get("max_results", max_results)
+        if tool_config is not None:
+            max_results = tool_config.model_extra.get("max_results", max_results)
 
-        client = _get_firecrawl_client("web_search")
+        client = _get_firecrawl_client(app_config, "web_search")
         result = client.search(query, limit=max_results)
 
         # result.web contains list of SearchResultWeb objects
@@ -47,7 +49,7 @@ def web_search_tool(query: str) -> str:
 
 
 @tool("web_fetch", parse_docstring=True)
-def web_fetch_tool(url: str) -> str:
+def web_fetch_tool(url: str, runtime: ToolRuntime) -> str:
     """Fetch the contents of a web page at a given URL.
     Only fetch EXACT URLs that have been provided directly by the user or have been returned in results from the web_search and web_fetch tools.
     This tool can NOT access content that requires authentication, such as private Google Docs or pages behind login walls.
@@ -58,7 +60,8 @@ def web_fetch_tool(url: str) -> str:
         url: The URL to fetch the contents of.
     """
     try:
-        client = _get_firecrawl_client("web_fetch")
+        app_config = resolve_context(runtime).app_config
+        client = _get_firecrawl_client(app_config, "web_fetch")
         result = client.scrape(url, formats=["markdown"])
 
         markdown_content = result.markdown or ""

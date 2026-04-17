@@ -38,7 +38,7 @@ def get_available_tools(
     model_name: str | None = None,
     subagent_enabled: bool = False,
     *,
-    app_config: AppConfig | None = None,
+    app_config: AppConfig,
 ) -> list[BaseTool]:
     """Get all available tools from config.
 
@@ -50,16 +50,11 @@ def get_available_tools(
         include_mcp: Whether to include tools from MCP servers (default: True).
         model_name: Optional model name to determine if vision tools should be included.
         subagent_enabled: Whether to include subagent tools (task, task_status).
-        app_config: Explicit application config. Falls back to AppConfig.current()
-            when omitted; new callers should pass this explicitly.
+        app_config: Application config — required.
 
     Returns:
         List of available tools.
     """
-    if app_config is None:
-        # TODO(P2-10): fold into a required parameter once all callers thread
-        # config explicitly (community tool factories, subagent registry, etc.).
-        app_config = AppConfig.current()
     config = app_config
     tool_configs = [tool for tool in config.tools if groups is None or tool.group in groups]
 

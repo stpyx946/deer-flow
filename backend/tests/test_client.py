@@ -44,9 +44,12 @@ def mock_app_config():
 
 @pytest.fixture
 def client(mock_app_config):
-    """Create a DeerFlowClient with mocked config loading."""
-    with patch.object(AppConfig, "current", return_value=mock_app_config):
-        return DeerFlowClient()
+    """Create a DeerFlowClient holding the mocked config directly.
+
+    Passing ``config=`` is the documented post-refactor way to inject a
+    test AppConfig; nothing relies on process-global state.
+    """
+    return DeerFlowClient(config=mock_app_config)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ class TestConfigQueries:
 
         with patch("deerflow.skills.loader.load_skills", return_value=[skill]) as mock_load:
             result = client.list_skills()
-            mock_load.assert_called_once_with(enabled_only=False)
+            mock_load.assert_called_once_with(client._app_config, enabled_only=False)
 
         assert "skills" in result
         assert len(result["skills"]) == 1
@@ -139,7 +142,7 @@ class TestConfigQueries:
     def test_list_skills_enabled_only(self, client):
         with patch("deerflow.skills.loader.load_skills", return_value=[]) as mock_load:
             client.list_skills(enabled_only=True)
-            mock_load.assert_called_once_with(enabled_only=True)
+            mock_load.assert_called_once_with(client._app_config, enabled_only=True)
 
     def test_get_memory(self, client):
         memory = {"version": "1.0", "facts": []}
@@ -1244,7 +1247,7 @@ class TestMemoryManagement:
 
         assert mock_import.call_count == 1
         call_args = mock_import.call_args
-        assert call_args.args == (imported,)
+        assert call_args.args == (client._app_config.memory, imported)
         assert "user_id" in call_args.kwargs
         assert result == imported
 
@@ -1269,6 +1272,7 @@ class TestMemoryManagement:
                 confidence=0.88,
             )
             create_fact.assert_called_once_with(
+                client._app_config.memory,
                 content="User prefers concise code reviews.",
                 category="preference",
                 confidence=0.88,
@@ -1279,7 +1283,7 @@ class TestMemoryManagement:
         data = {"version": "1.0", "facts": []}
         with patch("deerflow.agents.memory.updater.delete_memory_fact", return_value=data) as delete_fact:
             result = client.delete_memory_fact("fact_123")
-            delete_fact.assert_called_once_with("fact_123")
+            delete_fact.assert_called_once_with(client._app_config.memory, "fact_123")
         assert result == data
 
     def test_update_memory_fact(self, client):
@@ -1292,6 +1296,7 @@ class TestMemoryManagement:
                 confidence=0.91,
             )
             update_fact.assert_called_once_with(
+                client._app_config.memory,
                 fact_id="fact_123",
                 content="User prefers spaces",
                 category="workflow",
@@ -1307,6 +1312,7 @@ class TestMemoryManagement:
                 "User prefers spaces",
             )
             update_fact.assert_called_once_with(
+                client._app_config.memory,
                 fact_id="fact_123",
                 content="User prefers spaces",
                 category=None,
@@ -1802,7 +1808,7 @@ class TestScenarioConfigManagement:
             reloaded_config.mcp_servers = {"my-mcp": reloaded_server}
 
             client._agent = MagicMock()  # Simulate existing agent
-            AppConfig.init(MagicMock(extensions=current_config))
+            client._app_config = MagicMock(extensions=current_config)
             with (
                 patch("deerflow.client.ExtensionsConfig.resolve_config_path", return_value=config_file),
                 patch("deerflow.config.app_config.AppConfig.from_file", return_value=MagicMock(extensions=reloaded_config)),
@@ -2220,8 +2226,7 @@ class TestGatewayConformance:
         model.supports_thinking = False
         mock_app_config.models = [model]
 
-        with patch.object(AppConfig, "current", return_value=mock_app_config):
-            client = DeerFlowClient()
+        client = DeerFlowClient(config=mock_app_config)
 
         result = client.list_models()
         parsed = ModelsListResponse(**result)
@@ -2239,8 +2244,7 @@ class TestGatewayConformance:
         mock_app_config.models = [model]
         mock_app_config.get_model_config.return_value = model
 
-        with patch.object(AppConfig, "current", return_value=mock_app_config):
-            client = DeerFlowClient()
+        client = DeerFlowClient(config=mock_app_config)
 
         result = client.get_model("test-model")
         assert result is not None
@@ -3076,7 +3080,7 @@ class TestBugAgentInvalidationInconsistency:
             config_file = Path(tmp) / "ext.json"
             config_file.write_text("{}")
 
-            AppConfig.init(MagicMock(extensions=current_config))
+            client._app_config = MagicMock(extensions=current_config)
             with (
                 patch("deerflow.client.ExtensionsConfig.resolve_config_path", return_value=config_file),
                 patch("deerflow.config.app_config.AppConfig.from_file", return_value=MagicMock(extensions=reloaded)),

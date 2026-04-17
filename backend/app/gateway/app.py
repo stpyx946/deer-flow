@@ -146,11 +146,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
 
     try:
-        # app.state.config is the source of truth for Depends(get_config).
-        # AppConfig.init() mirrors it to the process-global for not-yet-migrated
-        # callers; both go away in P2-10 once AppConfig.current() is removed.
+        # ``app.state.config`` is the sole source of truth for
+        # ``Depends(get_config)``. Consumers that want AppConfig must receive
+        # it as an explicit parameter; there is no ambient singleton.
         app.state.config = AppConfig.from_file()
-        AppConfig.init(app.state.config)
         logger.info("Configuration loaded successfully")
     except Exception as e:
         error_msg = f"Failed to load configuration during gateway startup: {e}"
@@ -171,7 +170,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             from app.channels.service import start_channel_service
 
-            channel_service = await start_channel_service()
+            channel_service = await start_channel_service(app.state.config)
             logger.info("Channel service started: %s", channel_service.get_status())
         except Exception:
             logger.exception("No IM channels configured or channel service failed to start")

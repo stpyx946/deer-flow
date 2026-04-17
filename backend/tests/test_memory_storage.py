@@ -1,3 +1,15 @@
+
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
 """Tests for memory storage providers."""
 
 import threading
@@ -60,7 +72,7 @@ class TestFileMemoryStorage:
 
         with patch("deerflow.agents.memory.storage.get_paths", side_effect=mock_get_paths):
             with patch.object(AppConfig, "current", return_value=_app_config(storage_path="")):
-                storage = FileMemoryStorage()
+                storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
                 path = storage._get_memory_file_path(None)
                 assert path == tmp_path / "memory.json"
 
@@ -73,14 +85,14 @@ class TestFileMemoryStorage:
             return mock_paths
 
         with patch("deerflow.agents.memory.storage.get_paths", side_effect=mock_get_paths):
-            storage = FileMemoryStorage()
+            storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
             path = storage._get_memory_file_path("test-agent")
             assert path == tmp_path / "agents" / "test-agent" / "memory.json"
 
     @pytest.mark.parametrize("invalid_name", ["", "../etc/passwd", "agent/name", "agent\\name", "agent name", "agent@123", "agent_name"])
     def test_validate_agent_name_invalid(self, invalid_name):
         """Should raise ValueError for invalid agent names that don't match the pattern."""
-        storage = FileMemoryStorage()
+        storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
         with pytest.raises(ValueError, match="Invalid agent name|Agent name must be a non-empty string"):
             storage._validate_agent_name(invalid_name)
 
@@ -94,7 +106,7 @@ class TestFileMemoryStorage:
 
         with patch("deerflow.agents.memory.storage.get_paths", side_effect=mock_get_paths):
             with patch.object(AppConfig, "current", return_value=_app_config(storage_path="")):
-                storage = FileMemoryStorage()
+                storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
                 memory = storage.load()
                 assert isinstance(memory, dict)
                 assert memory["version"] == "1.0"
@@ -110,7 +122,7 @@ class TestFileMemoryStorage:
 
         with patch("deerflow.agents.memory.storage.get_paths", side_effect=mock_get_paths):
             with patch.object(AppConfig, "current", return_value=_app_config(storage_path="")):
-                storage = FileMemoryStorage()
+                storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
                 test_memory = {"version": "1.0", "facts": [{"content": "test fact"}]}
                 result = storage.save(test_memory)
                 assert result is True
@@ -129,7 +141,7 @@ class TestFileMemoryStorage:
 
         with patch("deerflow.agents.memory.storage.get_paths", side_effect=mock_get_paths):
             with patch.object(AppConfig, "current", return_value=_app_config(storage_path="")):
-                storage = FileMemoryStorage()
+                storage = FileMemoryStorage(_TEST_MEMORY_CONFIG)
                 # First load
                 memory1 = storage.load()
                 assert memory1["facts"][0]["content"] == "initial fact"
@@ -157,20 +169,20 @@ class TestGetMemoryStorage:
     def test_returns_file_memory_storage_by_default(self):
         """Should return FileMemoryStorage by default."""
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="deerflow.agents.memory.storage.FileMemoryStorage")):
-            storage = get_memory_storage()
+            storage = get_memory_storage(_TEST_MEMORY_CONFIG)
             assert isinstance(storage, FileMemoryStorage)
 
     def test_falls_back_to_file_memory_storage_on_error(self):
         """Should fall back to FileMemoryStorage if configured storage fails to load."""
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="non.existent.StorageClass")):
-            storage = get_memory_storage()
+            storage = get_memory_storage(_TEST_MEMORY_CONFIG)
             assert isinstance(storage, FileMemoryStorage)
 
     def test_returns_singleton_instance(self):
         """Should return the same instance on subsequent calls."""
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="deerflow.agents.memory.storage.FileMemoryStorage")):
-            storage1 = get_memory_storage()
-            storage2 = get_memory_storage()
+            storage1 = get_memory_storage(_TEST_MEMORY_CONFIG)
+            storage2 = get_memory_storage(_TEST_MEMORY_CONFIG)
             assert storage1 is storage2
 
     def test_get_memory_storage_thread_safety(self):
@@ -181,7 +193,7 @@ class TestGetMemoryStorage:
             # get_memory_storage is called concurrently from multiple threads while
             # AppConfig.get is patched once around thread creation. This verifies
             # that the singleton initialization remains thread-safe.
-            results.append(get_memory_storage())
+            results.append(get_memory_storage(_TEST_MEMORY_CONFIG))
 
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="deerflow.agents.memory.storage.FileMemoryStorage")):
             threads = [threading.Thread(target=get_storage) for _ in range(10)]
@@ -198,12 +210,12 @@ class TestGetMemoryStorage:
         """Should fall back to FileMemoryStorage if the configured class is not actually a class."""
         # Using a built-in function instead of a class
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="os.path.join")):
-            storage = get_memory_storage()
+            storage = get_memory_storage(_TEST_MEMORY_CONFIG)
             assert isinstance(storage, FileMemoryStorage)
 
     def test_get_memory_storage_non_subclass_fallback(self):
         """Should fall back to FileMemoryStorage if the configured class is not a subclass of MemoryStorage."""
         # Using 'dict' as a class that is not a MemoryStorage subclass
         with patch.object(AppConfig, "current", return_value=_app_config(storage_class="builtins.dict")):
-            storage = get_memory_storage()
+            storage = get_memory_storage(_TEST_MEMORY_CONFIG)
             assert isinstance(storage, FileMemoryStorage)

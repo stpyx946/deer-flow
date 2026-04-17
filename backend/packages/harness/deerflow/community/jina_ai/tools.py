@@ -1,14 +1,14 @@
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
 
 from deerflow.community.jina_ai.jina_client import JinaClient
-from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import resolve_context
 from deerflow.utils.readability import ReadabilityExtractor
 
 readability_extractor = ReadabilityExtractor()
 
 
 @tool("web_fetch", parse_docstring=True)
-async def web_fetch_tool(url: str) -> str:
+async def web_fetch_tool(url: str, runtime: ToolRuntime) -> str:
     """Fetch the contents of a web page at a given URL.
     Only fetch EXACT URLs that have been provided directly by the user or have been returned in results from the web_search and web_fetch tools.
     This tool can NOT access content that requires authentication, such as private Google Docs or pages behind login walls.
@@ -20,9 +20,9 @@ async def web_fetch_tool(url: str) -> str:
     """
     jina_client = JinaClient()
     timeout = 10
-    config = AppConfig.current().get_tool_config("web_fetch")
-    if config is not None and "timeout" in config.model_extra:
-        timeout = config.model_extra.get("timeout")
+    tool_config = resolve_context(runtime).app_config.get_tool_config("web_fetch")
+    if tool_config is not None and "timeout" in tool_config.model_extra:
+        timeout = tool_config.model_extra.get("timeout")
     html_content = await jina_client.crawl(url, return_format="html", timeout=timeout)
     if isinstance(html_content, str) and html_content.startswith("Error:"):
         return html_content

@@ -77,11 +77,13 @@ class TestTitleMiddlewareCoreLogic:
                 AIMessage(content="好的，先确认需求"),
             ]
         }
-        result = asyncio.run(middleware._agenerate_title_result(state, _make_title_config(max_chars=12)))
+        result = asyncio.run(middleware._agenerate_title_result(state, AppConfig(sandbox=SandboxConfig(use="test"), title=_make_title_config(max_chars=12))))
         title = result["title"]
 
         assert title == "短标题"
-        title_middleware_module.create_chat_model.assert_called_once_with(thinking_enabled=False)
+        from unittest.mock import ANY
+
+        title_middleware_module.create_chat_model.assert_called_once_with(thinking_enabled=False, app_config=ANY)
         model.ainvoke.assert_awaited_once()
 
     def test_generate_title_normalizes_structured_message_content(self, monkeypatch):
@@ -97,7 +99,7 @@ class TestTitleMiddlewareCoreLogic:
             ]
         }
 
-        result = asyncio.run(middleware._agenerate_title_result(state, _make_title_config(max_chars=20)))
+        result = asyncio.run(middleware._agenerate_title_result(state, AppConfig(sandbox=SandboxConfig(use="test"), title=_make_title_config(max_chars=20))))
         title = result["title"]
 
         assert title == "请帮我总结这段代码"
@@ -114,7 +116,7 @@ class TestTitleMiddlewareCoreLogic:
                 AIMessage(content="收到"),
             ]
         }
-        result = asyncio.run(middleware._agenerate_title_result(state, _make_title_config(max_chars=20)))
+        result = asyncio.run(middleware._agenerate_title_result(state, AppConfig(sandbox=SandboxConfig(use="test"), title=_make_title_config(max_chars=20))))
         title = result["title"]
 
         # Assert behavior (truncated fallback + ellipsis) without overfitting exact text.

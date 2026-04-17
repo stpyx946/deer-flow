@@ -5,9 +5,9 @@ Web Search Tool - Search the web using DuckDuckGo (no API key required).
 import json
 import logging
 
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
 
-from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import resolve_context
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ def _search_text(
 @tool("web_search", parse_docstring=True)
 def web_search_tool(
     query: str,
+    runtime: ToolRuntime,
     max_results: int = 5,
 ) -> str:
     """Search the web for information. Use this tool to find current information, news, articles, and facts from the internet.
@@ -63,11 +64,11 @@ def web_search_tool(
         query: Search keywords describing what you want to find. Be specific for better results.
         max_results: Maximum number of results to return. Default is 5.
     """
-    config = AppConfig.current().get_tool_config("web_search")
+    tool_config = resolve_context(runtime).app_config.get_tool_config("web_search")
 
     # Override max_results from config if set
-    if config is not None and "max_results" in config.model_extra:
-        max_results = config.model_extra.get("max_results", max_results)
+    if tool_config is not None and "max_results" in tool_config.model_extra:
+        max_results = tool_config.model_extra.get("max_results", max_results)
 
     results = _search_text(
         query=query,

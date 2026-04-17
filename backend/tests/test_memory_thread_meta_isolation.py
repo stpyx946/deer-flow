@@ -6,6 +6,17 @@ the in-memory LangGraph Store backend used when database.backend=memory.
 
 from __future__ import annotations
 
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
 from types import SimpleNamespace
 
 import pytest

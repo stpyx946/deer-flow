@@ -47,40 +47,16 @@ class TestResolveContext:
         runtime.context = ctx
         assert resolve_context(runtime) is ctx
 
-    def test_fallback_from_configurable(self):
-        """LangGraph Server path: runtime.context is None → construct from ContextVar + configurable."""
+    def test_raises_on_none_context(self):
+        """Without a typed DeerFlowContext, resolve_context refuses to guess."""
         runtime = MagicMock()
         runtime.context = None
-        config = _make_config()
-        with (
-            patch.object(AppConfig, "current", return_value=config),
-            patch("langgraph.config.get_config", return_value={"configurable": {"thread_id": "t2", "agent_name": "ag"}}),
-        ):
-            ctx = resolve_context(runtime)
-            assert ctx.thread_id == "t2"
-            assert ctx.agent_name == "ag"
-            assert ctx.app_config is config
+        with pytest.raises(RuntimeError, match="resolve_context: runtime.context is not a DeerFlowContext"):
+            resolve_context(runtime)
 
-    def test_fallback_empty_configurable(self):
-        """LangGraph Server path with no thread_id in configurable → empty string."""
-        runtime = MagicMock()
-        runtime.context = None
-        config = _make_config()
-        with (
-            patch.object(AppConfig, "current", return_value=config),
-            patch("langgraph.config.get_config", return_value={"configurable": {}}),
-        ):
-            ctx = resolve_context(runtime)
-            assert ctx.thread_id == ""
-            assert ctx.agent_name is None
-
-    def test_fallback_from_dict_context(self):
-        """Legacy path: runtime.context is a dict → extract from dict directly."""
+    def test_raises_on_dict_context(self):
+        """Legacy dict shape is no longer supported — we raise instead of lazily loading AppConfig."""
         runtime = MagicMock()
         runtime.context = {"thread_id": "old-dict", "agent_name": "from-dict"}
-        config = _make_config()
-        with patch.object(AppConfig, "current", return_value=config):
-            ctx = resolve_context(runtime)
-            assert ctx.thread_id == "old-dict"
-            assert ctx.agent_name == "from-dict"
-            assert ctx.app_config is config
+        with pytest.raises(RuntimeError, match="resolve_context: runtime.context is not a DeerFlowContext"):
+            resolve_context(runtime)

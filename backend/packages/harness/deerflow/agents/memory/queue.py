@@ -12,6 +12,12 @@ from deerflow.config.app_config import AppConfig
 logger = logging.getLogger(__name__)
 
 
+# Module-level config pointer set by the middleware that owns the queue.
+# The queue runs on a background Timer thread where ``Runtime`` and FastAPI
+# request context are not accessible; the enqueuer (which does have runtime
+# context) is responsible for plumbing ``AppConfig`` through ``add()``.
+
+
 @dataclass
 class ConversationContext:
     """Context for a conversation to be processed for memory update."""
@@ -31,10 +37,21 @@ class MemoryUpdateQueue:
     This queue collects conversation contexts and processes them after
     a configurable debounce period. Multiple conversations received within
     the debounce window are batched together.
+
+    The queue captures an ``AppConfig`` reference at construction time and
+    reuses it for the MemoryUpdater it spawns. Callers must construct a
+    fresh queue when the config changes rather than reaching into a global.
     """
 
-    def __init__(self):
-        """Initialize the memory update queue."""
+    def __init__(self, app_config: AppConfig):
+        """Initialize the memory update queue.
+
+        Args:
+            app_config: Application config. The queue reads its own
+                ``memory`` section for debounce timing and hands the full
+                config to :class:`MemoryUpdater`.
+        """
+        self._app_config = app_config
         self._queue: list[ConversationContext] = []
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
@@ -49,19 +66,8 @@ class MemoryUpdateQueue:
         correction_detected: bool = False,
         reinforcement_detected: bool = False,
     ) -> None:
-        """Add a conversation to the update queue.
-
-        Args:
-            thread_id: The thread ID.
-            messages: The conversation messages.
-            agent_name: If provided, memory is stored per-agent. If None, uses global memory.
-            user_id: The user ID captured at enqueue time. Stored in ConversationContext so it
-                survives the threading.Timer boundary (ContextVar does not propagate across
-                raw threads).
-            correction_detected: Whether recent turns include an explicit correction signal.
-            reinforcement_detected: Whether recent turns include a positive reinforcement signal.
-        """
-        config = AppConfig.current().memory
+        """Add a conversation to the update queue."""
+        config = self._app_config.memory
         if not config.enabled:
             return
 
@@ -93,7 +99,7 @@ class MemoryUpdateQueue:
 
     def _reset_timer(self) -> None:
         """Reset the debounce timer."""
-        config = AppConfig.current().memory
+        config = self._app_config.memory
 
         # Cancel existing timer if any
         if self._timer is not None:
@@ -131,7 +137,7 @@ class MemoryUpdateQueue:
         logger.info("Processing %d queued memory updates", len(contexts_to_process))
 
         try:
-            updater = MemoryUpdater()
+            updater = MemoryUpdater(self._app_config)
 
             for context in contexts_to_process:
                 try:
@@ -196,31 +202,35 @@ class MemoryUpdateQueue:
             return self._processing
 
 
-# Global singleton instance
-_memory_queue: MemoryUpdateQueue | None = None
+# Queues keyed by ``id(AppConfig)`` so tests and multi-client setups with
+# distinct configs do not share a debounce queue.
+_memory_queues: dict[int, MemoryUpdateQueue] = {}
 _queue_lock = threading.Lock()
 
 
-def get_memory_queue() -> MemoryUpdateQueue:
-    """Get the global memory update queue singleton.
-
-    Returns:
-        The memory update queue instance.
-    """
-    global _memory_queue
+def get_memory_queue(app_config: AppConfig) -> MemoryUpdateQueue:
+    """Get or create the memory update queue for the given app config."""
+    key = id(app_config)
     with _queue_lock:
-        if _memory_queue is None:
-            _memory_queue = MemoryUpdateQueue()
-        return _memory_queue
+        queue = _memory_queues.get(key)
+        if queue is None:
+            queue = MemoryUpdateQueue(app_config)
+            _memory_queues[key] = queue
+        return queue
 
 
-def reset_memory_queue() -> None:
-    """Reset the global memory queue.
+def reset_memory_queue(app_config: AppConfig | None = None) -> None:
+    """Reset memory queue(s).
 
-    This is useful for testing.
+    Pass an ``app_config`` to reset only its queue, or omit to reset all
+    (useful at test teardown).
     """
-    global _memory_queue
     with _queue_lock:
-        if _memory_queue is not None:
-            _memory_queue.clear()
-        _memory_queue = None
+        if app_config is not None:
+            queue = _memory_queues.pop(id(app_config), None)
+            if queue is not None:
+                queue.clear()
+            return
+        for queue in _memory_queues.values():
+            queue.clear()
+        _memory_queues.clear()

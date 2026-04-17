@@ -314,7 +314,7 @@ class TestLocalSandboxProviderMounts:
         )
 
         with patch.object(AppConfig, "current", return_value=config):
-            provider = LocalSandboxProvider()
+            provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/custom-skills"]
 
@@ -336,7 +336,7 @@ class TestLocalSandboxProviderMounts:
         )
 
         with patch.object(AppConfig, "current", return_value=config):
-            provider = LocalSandboxProvider()
+            provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills"]
 
@@ -360,7 +360,7 @@ class TestLocalSandboxProviderMounts:
         )
 
         with patch.object(AppConfig, "current", return_value=config):
-            provider = LocalSandboxProvider()
+            provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills"]
 
@@ -384,6 +384,6 @@ class TestLocalSandboxProviderMounts:
         )
 
         with patch.object(AppConfig, "current", return_value=config):
-            provider = LocalSandboxProvider()
+            provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills", "/mnt/data"]

@@ -86,7 +86,7 @@ async def _async_store(config) -> AsyncIterator[BaseStore]:
 
 
 @contextlib.asynccontextmanager
-async def make_store() -> AsyncIterator[BaseStore]:
+async def make_store(app_config: AppConfig) -> AsyncIterator[BaseStore]:
     """Async context manager that yields a Store whose backend matches the
     configured checkpointer.
 
@@ -94,20 +94,18 @@ async def make_store() -> AsyncIterator[BaseStore]:
     :func:`deerflow.runtime.checkpointer.async_provider.make_checkpointer` so
     that both singletons always use the same persistence technology::
 
-        async with make_store() as store:
+        async with make_store(app_config) as store:
             app.state.store = store
 
     Yields an :class:`~langgraph.store.memory.InMemoryStore` when no
     ``checkpointer`` section is configured (emits a WARNING in that case).
     """
-    config = AppConfig.current()
-
-    if config.checkpointer is None:
+    if app_config.checkpointer is None:
         from langgraph.store.memory import InMemoryStore
 
         logger.warning("No 'checkpointer' section in config.yaml — using InMemoryStore for the store. Thread list will be lost on server restart. Configure a sqlite or postgres backend for persistence.")
         yield InMemoryStore()
         return
 
-    async with _async_store(config.checkpointer) as store:
+    async with _async_store(app_config.checkpointer) as store:
         yield store

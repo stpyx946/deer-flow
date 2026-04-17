@@ -53,16 +53,18 @@ async def langgraph_runtime(app: FastAPI) -> AsyncGenerator[None, None]:
     from deerflow.runtime.events.store import make_run_event_store
 
     async with AsyncExitStack() as stack:
-        app.state.stream_bridge = await stack.enter_async_context(make_stream_bridge())
+        # app.state.config is populated earlier in lifespan(); thread it into
+        # every provider that used to reach for AppConfig.current().
+        config = app.state.config
+
+        app.state.stream_bridge = await stack.enter_async_context(make_stream_bridge(config))
 
         # Initialize persistence engine BEFORE checkpointer so that
         # auto-create-database logic runs first (postgres backend).
-        # Use app.state.config which was populated earlier in lifespan().
-        config = app.state.config
         await init_engine_from_config(config.database)
 
-        app.state.checkpointer = await stack.enter_async_context(make_checkpointer())
-        app.state.store = await stack.enter_async_context(make_store())
+        app.state.checkpointer = await stack.enter_async_context(make_checkpointer(config))
+        app.state.store = await stack.enter_async_context(make_store(config))
 
         # Initialize repositories — one get_session_factory() call for all.
         sf = get_session_factory()

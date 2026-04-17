@@ -50,12 +50,13 @@ def test_custom_skills_router_lifecycle(monkeypatch, tmp_path):
     monkeypatch.setattr("app.gateway.routers.skills.scan_skill_content", lambda *args, **kwargs: _async_scan("allow", "ok"))
     refresh_calls = []
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         refresh_calls.append("refresh")
 
     monkeypatch.setattr("app.gateway.routers.skills.refresh_skills_system_prompt_cache_async", _refresh)
 
     app = FastAPI()
+    app.state.config = config
     app.include_router(skills_router.router)
 
     with TestClient(app) as client:
@@ -96,12 +97,12 @@ def test_custom_skill_rollback_blocked_by_scanner(monkeypatch, tmp_path):
         skill_evolution=SimpleNamespace(enabled=True, moderation_model_name=None),
     )
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: config))
-    get_skill_history_file("demo-skill").write_text(
+    get_skill_history_file("demo-skill", config).write_text(
         '{"action":"human_edit","prev_content":' + json.dumps(original_content) + ',"new_content":' + json.dumps(edited_content) + "}\n",
         encoding="utf-8",
     )
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         return None
 
     monkeypatch.setattr("app.gateway.routers.skills.refresh_skills_system_prompt_cache_async", _refresh)
@@ -114,6 +115,7 @@ def test_custom_skill_rollback_blocked_by_scanner(monkeypatch, tmp_path):
     monkeypatch.setattr("app.gateway.routers.skills.scan_skill_content", _scan)
 
     app = FastAPI()
+    app.state.config = config
     app.include_router(skills_router.router)
 
     with TestClient(app) as client:
@@ -140,12 +142,13 @@ def test_custom_skill_delete_preserves_history_and_allows_restore(monkeypatch, t
     monkeypatch.setattr("app.gateway.routers.skills.scan_skill_content", lambda *args, **kwargs: _async_scan("allow", "ok"))
     refresh_calls = []
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         refresh_calls.append("refresh")
 
     monkeypatch.setattr("app.gateway.routers.skills.refresh_skills_system_prompt_cache_async", _refresh)
 
     app = FastAPI()
+    app.state.config = config
     app.include_router(skills_router.router)
 
     with TestClient(app) as client:
@@ -169,13 +172,13 @@ def test_update_skill_refreshes_prompt_cache_before_return(monkeypatch, tmp_path
     enabled_state = {"value": True}
     refresh_calls = []
 
-    def _load_skills(*, enabled_only: bool):
+    def _load_skills(*a, enabled_only: bool = False, **k):
         skill = _make_skill("demo-skill", enabled=enabled_state["value"])
         if enabled_only and not skill.enabled:
             return []
         return [skill]
 
-    async def _refresh():
+    async def _refresh(*a, **k):
         refresh_calls.append("refresh")
         enabled_state["value"] = False
 
@@ -183,7 +186,6 @@ def test_update_skill_refreshes_prompt_cache_before_return(monkeypatch, tmp_path
 
     monkeypatch.setattr("app.gateway.routers.skills.load_skills", _load_skills)
     monkeypatch.setattr(AppConfig, "current", staticmethod(lambda: _app_cfg))
-    monkeypatch.setattr(AppConfig, "init", staticmethod(lambda _cfg: None))
     monkeypatch.setattr(AppConfig, "from_file", staticmethod(lambda: _app_cfg))
     monkeypatch.setattr(skills_router.ExtensionsConfig, "resolve_config_path", staticmethod(lambda: config_path))
     monkeypatch.setattr("app.gateway.routers.skills.refresh_skills_system_prompt_cache_async", _refresh)

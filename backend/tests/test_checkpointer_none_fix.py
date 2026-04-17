@@ -22,7 +22,7 @@ class TestCheckpointerNoneFix:
         mock_config.database = None
 
         with patch.object(AppConfig, "current", return_value=mock_config):
-            async with make_checkpointer() as checkpointer:
+            async with make_checkpointer(AppConfig.current()) as checkpointer:
                 # Should return InMemorySaver, not None
                 assert checkpointer is not None
                 assert isinstance(checkpointer, InMemorySaver)
@@ -45,7 +45,7 @@ class TestCheckpointerNoneFix:
         mock_config.checkpointer = None
 
         with patch.object(AppConfig, "current", return_value=mock_config):
-            with checkpointer_context() as checkpointer:
+            with checkpointer_context(AppConfig.current()) as checkpointer:
                 # Should return InMemorySaver, not None
                 assert checkpointer is not None
                 assert isinstance(checkpointer, InMemorySaver)
