@@ -1,0 +1,30 @@
+name: Sync fork
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT }}
+      - name: Sync from upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/bytedance/deer-flow.git
+          git fetch upstream
+          DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
+          LOCAL_BRANCH=$(git remote show origin | grep 'HEAD branch' | awk '{print $NF}')
+          git checkout $LOCAL_BRANCH
+          cp .github/workflows/sync-fork.yml /tmp/sync-fork.yml.bak 2>/dev/null || true
+          git reset --hard upstream/$DEFAULT_BRANCH
+          mkdir -p .github/workflows
+          cp /tmp/sync-fork.yml.bak .github/workflows/sync-fork.yml 2>/dev/null || true
+          git add .github/workflows/sync-fork.yml 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: preserve sync-fork workflow"
+          git push origin $LOCAL_BRANCH --force
